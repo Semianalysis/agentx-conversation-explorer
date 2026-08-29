@@ -1,4 +1,4 @@
-"""Pure data helpers for the Turns tab: filtering + histogram binning.
+"""Pure filtering + histogram-binning helpers (the Correlations tab's core).
 
 No Dash imports — this is the unit-test surface.
 """

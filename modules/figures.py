@@ -1,4 +1,4 @@
-"""Figure builders shared by the Turns and Correlations tabs.
+"""Figure builders for the Correlations tab's histograms.
 
 Histograms are drawn as uniform-width bars over BIN INDEX (categorical), with
 edge labels on the ticks — plotly bars on a true log axis misbehave, and index
@@ -11,7 +11,7 @@ import math
 import plotly.graph_objects as go
 
 from modules import theme
-from modules.turns_data import bin_counts, edge_label, make_bins, value_stats
+from modules.binning import bin_counts, edge_label, make_bins, value_stats
 
 
 def empty_figure(title: str, reason: str, height: int | None = 260) -> go.Figure:
@@ -49,43 +49,6 @@ def _stats_annotation(fig: go.Figure, values: list[float]) -> None:
         showarrow=False, xref="paper", yref="paper", x=0.99, y=1.13,
         font=dict(family=theme.MONO, size=11, color="#444"), align="right",
     )
-
-
-def histogram_figure(
-    values: list[float],
-    title: str,
-    log_x: bool,
-    n_bins: int,
-    color: str = "#1f77b4",
-    gates: dict | None = None,
-) -> go.Figure:
-    """One distribution as index-bars + stats annotation (Turns tab)."""
-    if not values:
-        gate_txt = " → ".join(f"{k}={v}" for k, v in (gates or {}).items())
-        return empty_figure(title, f"0 rows after filters ({gate_txt or 'empty pool'})")
-
-    edges = make_bins(values, n_bins, log_x)
-    counts = bin_counts(values, edges, log_x)
-    n = len(counts)
-    hover = [
-        f"[{edge_label(edges[i])}, {edge_label(edges[i + 1])})<br>count={counts[i]}"
-        for i in range(n)
-    ]
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=list(range(n)), y=counts, marker_color=color, marker_line_width=0,
-        hovertext=hover, hoverinfo="text", name="",
-    ))
-    _apply_index_ticks(fig, edges, log_x)
-    fig.update_yaxes(title_text="requests", title_font_size=11)
-    fig.update_layout(**theme.base_layout(
-        title=dict(text=title, font=dict(size=13)),
-        height=260,
-        bargap=0.05,
-    ))
-    _stats_annotation(fig, values)
-    return fig
 
 
 def multi_histogram_figure(

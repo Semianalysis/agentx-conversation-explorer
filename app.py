@@ -11,8 +11,7 @@ from dash import Dash, Input, Output, dcc, html
 
 from modules import (correlations_callbacks, correlations_layout,
                      deepdive_callbacks, deepdive_layout, explorer_callbacks,
-                     explorer_layout, overview_callbacks, overview_layout,
-                     turns_callbacks, turns_layout)
+                     explorer_layout, overview_callbacks, overview_layout)
 from modules.theme import F_BASE
 from modules.version import APP_BUILD
 
@@ -22,7 +21,6 @@ logging.basicConfig(level=logging.INFO,
 _TABS = [
     ("overview", "Overview"),
     ("explorer", "Explorer"),
-    ("turns", "Turns"),
     ("correlations", "Correlations"),
     ("deepdive", "Deep-dive"),
 ]
@@ -31,7 +29,7 @@ _APP_NAME = f"AgentX Conversation Explorer bld {APP_BUILD}"
 
 app = Dash(__name__, title=_APP_NAME)
 
-# All four tab bodies stay MOUNTED (dcc.Tabs swaps children out, which would
+# All tab bodies stay MOUNTED (dcc.Tabs swaps children out, which would
 # destroy each tab's stores); a style callback toggles visibility instead.
 app.layout = html.Div(
     style={"display": "flex", "flexDirection": "column", "height": "100vh",
@@ -65,8 +63,6 @@ app.layout = html.Div(
                  style={"flex": "1 1 auto", "minHeight": "0"}),
         html.Div(explorer_layout.layout(), id="at-tabwrap-explorer",
                  style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
-        html.Div(turns_layout.layout(), id="at-tabwrap-turns",
-                 style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
         html.Div(correlations_layout.layout(), id="at-tabwrap-correlations",
                  style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
         html.Div(deepdive_layout.layout(), id="at-tabwrap-deepdive",
@@ -91,7 +87,6 @@ def switch_tab(active):
 
 overview_callbacks.register_overview_callbacks(app)
 explorer_callbacks.register_explorer_callbacks(app)
-turns_callbacks.register_turns_callbacks(app)
 correlations_callbacks.register_correlations_callbacks(app)
 deepdive_callbacks.register_deepdive_callbacks(app)
 

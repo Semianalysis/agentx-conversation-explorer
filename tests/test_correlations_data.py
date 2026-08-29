@@ -3,11 +3,11 @@ import unittest
 
 from modules.correlations_data import (MAX_SELECTIONS, add_bin_range,
                                        add_selection, bin_runs, bins_subset,
-                                       delete_selection, initial_store,
-                                       selection_color, set_applied, set_live,
-                                       toggle_bin)
+                                       clear_selection, initial_store,
+                                       selection_color, set_live, toggle_bin,
+                                       toggle_on)
 from modules.figures import selection_to_bins
-from modules.turns_data import bin_index, make_bins
+from modules.binning import bin_index, make_bins
 
 
 def _rec(context=1000, new_input=100, output=50):
@@ -18,10 +18,10 @@ def _rec(context=1000, new_input=100, output=50):
 class TestSelectionStore(unittest.TestCase):
     def test_initial_shape(self):
         s = initial_store()
-        self.assertEqual(len(s["selections"]), 1)
+        self.assertEqual(len(s["selections"]), 1)  # one section always present
         self.assertEqual(s["live"], s["selections"][0]["sid"])
-        self.assertFalse(s["applied"])
         self.assertIsNone(s["selections"][0]["dim"])
+        self.assertFalse(s["selections"][0]["on"])  # apply off while unused
 
     def test_toggle_anchors_then_toggles(self):
         s = toggle_bin(initial_store(), 0, "context", 5)
@@ -32,11 +32,14 @@ class TestSelectionStore(unittest.TestCase):
         s = toggle_bin(s, 0, "context", 5)
         self.assertEqual(s["selections"][0]["bins"], [2])
 
-    def test_removing_last_bin_unanchors(self):
+    def test_removing_last_bin_unanchors_and_turns_apply_off(self):
         s = toggle_bin(initial_store(), 0, "context", 5)
+        s = toggle_on(s, 0)
         s = toggle_bin(s, 0, "context", 5)
-        self.assertIsNone(s["selections"][0]["dim"])
-        # re-anchorable to a different dim afterwards
+        sel = s["selections"][0]
+        self.assertIsNone(sel["dim"])
+        self.assertFalse(sel["on"])  # empty selection is never 'in use'
+        # section persists and is re-anchorable to a different dim
         s = toggle_bin(s, 0, "output", 3)
         self.assertEqual(s["selections"][0]["dim"], "output")
 
@@ -66,24 +69,29 @@ class TestSelectionStore(unittest.TestCase):
         with self.assertRaises(ValueError):
             add_selection(s)
 
-    def test_delete_keeps_one_section_and_fixes_live(self):
-        s = add_selection(initial_store())          # sids [0, 1], live 1
-        s = delete_selection(s, 1)
-        self.assertEqual([x["sid"] for x in s["selections"]], [0])
-        self.assertEqual(s["live"], 0)
-        s = delete_selection(s, 0)                  # last one -> fresh empty
-        self.assertEqual(len(s["selections"]), 1)
-        self.assertIsNone(s["selections"][0]["dim"])
-        self.assertEqual(s["live"], s["selections"][0]["sid"])
+    def test_clear_empties_but_keeps_the_section(self):
+        s = toggle_bin(initial_store(), 0, "context", 5)
+        s = toggle_on(s, 0)
+        s = clear_selection(s, 0)
+        self.assertEqual(len(s["selections"]), 1)   # never disappears
+        sel = s["selections"][0]
+        self.assertEqual((sel["dim"], sel["bins"], sel["on"]), (None, [], False))
 
-    def test_set_live_and_applied(self):
+    def test_toggle_on_flips_per_selection(self):
+        s = add_selection(toggle_bin(initial_store(), 0, "context", 5))
+        s = toggle_bin(s, 1, "output", 2)
+        s = toggle_on(s, 1)
+        self.assertFalse(s["selections"][0]["on"])  # independent toggles
+        self.assertTrue(s["selections"][1]["on"])
+        s = toggle_on(s, 1)
+        self.assertFalse(s["selections"][1]["on"])
+
+    def test_set_live(self):
         s = add_selection(initial_store())
         s = set_live(s, 0)
         self.assertEqual(s["live"], 0)
         with self.assertRaises(KeyError):
             set_live(s, 42)
-        s = set_applied(s, True)
-        self.assertTrue(s["applied"])
 
     def test_mutations_are_copy_on_write(self):
         before = initial_store()

@@ -17,14 +17,28 @@ from modules.explorer_data import (augment_rows_with_compute,
                                    conversation_curves, sync_updates)
 from modules.explorer_layout import TABLE_COLUMNS
 from modules.theme import color_for
-from modules.turns_callbacks import cached_dataset_options
 
 logger = logging.getLogger(__name__)
 
 # The dataset is GLOBAL state — every tab is a viewport onto the same data.
-# These dropdowns are three views of ONE value, synced both ways.
-_DATASET_DDS = ("at-explorer-dataset-dd", "at-turns-dataset-dd",
-                "at-corr-dataset-dd")
+# These dropdowns are two views of ONE value, synced both ways.
+_DATASET_DDS = ("at-explorer-dataset-dd", "at-corr-dataset-dd")
+
+
+def cached_dataset_options() -> list[dict]:
+    """Datasets with at least one cached conversation (dropdown options for
+    every tab that offers the shared dataset picker)."""
+    opts = []
+    try:
+        datasets = api_client.fetch_datasets()
+    except Exception:
+        return []
+    for d in datasets:
+        n = len(api_client.cached_conversation_ids(d["slug"]))
+        if n:
+            opts.append({"label": f"{d.get('label', d['slug'])} ({n} convs cached)",
+                         "value": d["slug"]})
+    return opts
 
 
 def _annotate_sort_columns(sort_by: list[dict]) -> list[dict]:

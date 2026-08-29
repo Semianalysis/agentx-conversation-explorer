@@ -1,7 +1,7 @@
 """Tests for Turns-tab pure helpers: filters, binning, stats."""
 import unittest
 
-from modules.turns_data import (bin_counts, dimension_values, filter_records,
+from modules.binning import (bin_counts, dimension_values, filter_records,
                                 make_bins, value_stats)
 
 
