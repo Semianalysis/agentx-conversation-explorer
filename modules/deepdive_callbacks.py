@@ -34,12 +34,14 @@ def register_deepdive_callbacks(app) -> None:
         Input("at-deep-y2-radio", "value"),
         Input("at-deep-y3-radio", "value"),
         Input("at-deep-groupopts-cl", "value"),
+        Input("at-deep-xscale-radio", "value"),
     )
-    def coalesce_axes(x, y1, y2, y3, groupopts):
+    def coalesce_axes(x, y1, y2, y3, groupopts, xscale):
         groupopts = groupopts or []
         return {"x": x, "y1": y1, "y2": y2, "y3": y3,
                 "grouped": "grouped" in groupopts,
-                "envelope": "envelope" in groupopts}
+                "envelope": "envelope" in groupopts,
+                "xscale": xscale or "auto"}
 
     @app.callback(
         Output("at-deep-y1-graph", "figure"),
@@ -80,19 +82,22 @@ def register_deepdive_callbacks(app) -> None:
             agg = aggregate_selection(pool, conv_ids, arch, cfg, ordinal)
             gpu_time = implied_gpu_seconds(agg["totals"], gpu, cfg)
 
+            xscale = axes.get("xscale", "auto")
+            x_scale_eff = (X_MEASURES[axes["x"]]["scale"] if xscale == "auto"
+                           else xscale)
             figs = [
                 _measure_figure(agg["per_request"], axes["x"], axes[y_name],
                                 agg["n_convs"],
                                 grouped=axes.get("grouped", False),
-                                envelope=axes.get("envelope", False))
+                                envelope=axes.get("envelope", False),
+                                x_scale=x_scale_eff)
                 for y_name in ("y1", "y2", "y3")
             ]
             # One locked x window for all three charts (grouped-mode bin mids
             # sit at most half a bin inside the data extremes — the 2% pad
             # covers that, so the same range fits every chart mode).
             x_range = shared_axis_range(
-                measure_series(agg["per_request"], axes["x"]),
-                X_MEASURES[axes["x"]]["scale"])
+                measure_series(agg["per_request"], axes["x"]), x_scale_eff)
             for fig in figs:
                 fig.update_xaxes(range=x_range, autorange=False)
             return (*figs, _summary_panel(arch, gpu, cfg, agg, gpu_time,
@@ -105,8 +110,15 @@ def register_deepdive_callbacks(app) -> None:
 
 
 def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
-                    grouped: bool = False, envelope: bool = False) -> go.Figure:
-    xm, ym = X_MEASURES[x_key], Y_MEASURES[y_key]
+                    grouped: bool = False, envelope: bool = False,
+                    x_scale: str | None = None) -> go.Figure:
+    """x_scale overrides the x measure's natural axis scale ('linear'/'log');
+    None keeps the registry's scale."""
+    xm, ym = dict(X_MEASURES[x_key]), Y_MEASURES[y_key]
+    if x_scale:
+        if x_scale not in ("linear", "log"):
+            raise ValueError(f"unknown x_scale override {x_scale!r}")
+        xm["scale"] = x_scale
     fig = go.Figure()
     title = ym["label"]
     if grouped and x_key != "conv_number" and n_convs > 1:

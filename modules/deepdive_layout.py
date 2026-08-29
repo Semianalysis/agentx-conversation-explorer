@@ -137,6 +137,29 @@ def layout() -> html.Div:
                      style={"fontSize": "11px", "color": "#666", "marginTop": "8px",
                             "display": "flex", "alignItems": "center"}),
             _measure_matrix(),
+            html.Div(
+                style={"display": "flex", "alignItems": "center", "gap": "8px",
+                       "marginTop": "6px", "fontSize": "11px"},
+                children=[
+                    html.Span(["x scale",
+                               controls.info(
+                                   "Axis scale of the shared x measure on all "
+                                   "three charts. auto = the measure's natural "
+                                   "scale (ordinals linear, magnitudes log). "
+                                   "The locked shared range follows this "
+                                   "choice.")],
+                              style={"color": "#666", "fontWeight": "600",
+                                     "display": "flex",
+                                     "alignItems": "center"}),
+                    dcc.RadioItems(
+                        id="at-deep-xscale-radio",
+                        options=[{"label": " auto", "value": "auto"},
+                                 {"label": " linear", "value": "linear"},
+                                 {"label": " log", "value": "log"}],
+                        value="auto", inline=True,
+                        labelStyle={"marginRight": "10px"},
+                        style={"fontSize": "11px"}),
+                ]),
             dcc.Checklist(
                 id="at-deep-groupopts-cl",
                 options=[

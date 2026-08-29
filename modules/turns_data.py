@@ -70,18 +70,22 @@ def make_bins(values: list[float], n_bins: int, log_x: bool) -> list[float]:
     return edges
 
 
+def bin_index(edges: list[float], value: float, log_x: bool) -> int:
+    """Bin index of one value under the same clamping rules as bin_counts:
+    values below edge[0] land in bin 0 (log-x clamps sub-1 values), values
+    at/above the last edge raise — an out-of-range value means the edges
+    don't belong to this data."""
+    x = max(value, 1.0) if log_x else value
+    if x >= edges[-1]:
+        raise ValueError(f"value {value} >= last bin edge {edges[-1]}")
+    return max(_bisect(edges, x), 0)
+
+
 def bin_counts(values: list[float], edges: list[float], log_x: bool) -> list[int]:
-    """Histogram counts for precomputed edges. Values below edge[0] land in bin 0
-    (log-x clamps sub-1 values), values at/above the last edge raise — an
-    out-of-range value means the edges don't belong to this data."""
-    n = len(edges) - 1
-    counts = [0] * n
+    """Histogram counts for precomputed edges (bin_index rules)."""
+    counts = [0] * (len(edges) - 1)
     for v in values:
-        x = max(v, 1.0) if log_x else v
-        if x >= edges[-1]:
-            raise ValueError(f"value {v} >= last bin edge {edges[-1]}")
-        idx = _bisect(edges, x)
-        counts[max(idx, 0)] += 1
+        counts[bin_index(edges, v, log_x)] += 1
     return counts
 
 
