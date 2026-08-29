@@ -122,9 +122,11 @@ def _num_options(values: list[int]) -> list[dict]:
 def layout() -> html.Div:
     side = controls.sidebar([
         controls.label("Dataset",
-                       info_text="Pick which cached dataset to explore — every "
-                                 "tab follows this choice. Datasets are "
-                                 "imported and downloaded on the Overview tab."),
+                       info_text="The dataset is SHARED state: every tab is a "
+                                 "viewport onto the same data, and picking a "
+                                 "dataset on any tab switches all of them. "
+                                 "Datasets are imported and downloaded on the "
+                                 "Overview tab."),
         controls.dropdown("at-explorer-dataset-dd", "pick a cached dataset"),
         controls.label("Chart x scale (turn count)",
                        info_text="Scale of the growth chart's x axis (main-"

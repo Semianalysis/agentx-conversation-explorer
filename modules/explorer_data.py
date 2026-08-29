@@ -157,3 +157,22 @@ def apply_selection(records: list[dict], selection: dict | None, slug: str,
     ids = set(selection["conv_ids"])
     out = [r for r in records if r["conv_id"] in ids]
     return out, {"n_sel_convs": len(ids), "n_after_selection": len(out)}
+
+
+def sync_updates(values: list, trig_index: int) -> tuple | None:
+    """Propagate one widget's value across a group of synced widgets (the
+    shared dataset dropdowns: every tab is a viewport onto the SAME dataset).
+
+    Returns (value, stale_indices) — the trigger's value and the widgets that
+    must be written — or None when all values already agree; the caller must
+    then skip the write, or the sync echoes forever. The value itself may be
+    None (a cleared dropdown clears the others too), which is why "no change"
+    is signaled by index absence, never by a None value.
+    """
+    if not 0 <= trig_index < len(values):
+        raise IndexError(f"trig_index {trig_index} out of range 0..{len(values) - 1}")
+    v = values[trig_index]
+    stale = [i for i, x in enumerate(values) if x != v]
+    if not stale:
+        return None
+    return v, stale

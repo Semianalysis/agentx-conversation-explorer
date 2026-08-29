@@ -11,6 +11,14 @@ Independent project — it imitates the InferenceX Explorer tab of
 
 ## Assignment (standing spec)
 
+- **One state, many viewports (standing principle, restated by the user 2026-08-29).**
+  Dataset, conversation selection, and serving assumptions are GLOBAL — switching
+  tabs retains them. The dataset dropdowns on Explorer/Turns/Correlations are three
+  synced views of ONE value (sync_updates + self-loop callback in
+  explorer_callbacks); the conversation selection store and assumption config flow
+  from Explorer everywhere. Everything else a tab offers is a VIEWPORT option local
+  to that tab: axis/measure choices, log/linear scales, role and model filters, bin
+  counts, correlation inspectors/selections, list sort/filter.
 - **Overview tab** — import trace data, summarize the datasets found (counts, token totals,
   model mix, cached fraction). When an Explorer selection exists, a selection-scoped
   summary card renders above the dataset cards.
