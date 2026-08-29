@@ -120,22 +120,80 @@ def _sig3(x: float) -> float:
     return float(f"{x:.3g}")
 
 
-def conversation_curves(pool: list[dict], conv_ids: set[str] | None = None,
-                        ) -> dict[str, tuple[list[int], list[int]]]:
-    """Growth curve per conversation: x = main-turn ordinal (1..n, linear),
-    y = that turn's input context tokens (log axis on the chart).
+def busy_offsets(recs_by_start: list[dict]) -> list[float]:
+    """ACTIVE seconds elapsed at each record's start: the union measure of
+    the earlier [start_s, end_s] intervals (overlaps merge, idle gaps
+    contribute nothing). Input must be sorted by start_s — the union of the
+    intervals seen so far is then a set of CLOSED segments plus one open
+    merged segment. Raises on unsorted input. Returns one value per record,
+    aligned with the input order."""
+    out: list[float] = []
+    busy_closed_s = 0.0
+    seg_start_s = seg_end_s = None
+    prev_s = None
+    for r in recs_by_start:
+        s, e = r["start_s"], r["end_s"]
+        if prev_s is not None and s < prev_s:
+            raise ValueError("busy_offsets input not sorted by start_s")
+        prev_s = s
+        if seg_start_s is None:
+            b = 0.0
+            seg_start_s, seg_end_s = s, e
+        elif s > seg_end_s:  # idle gap: close the segment, start a new one
+            busy_closed_s += seg_end_s - seg_start_s
+            b = busy_closed_s
+            seg_start_s, seg_end_s = s, e
+        else:  # overlaps the open segment
+            b = busy_closed_s + (s - seg_start_s)
+            seg_end_s = max(seg_end_s, e)
+        out.append(b)
+    return out
 
+
+# x-measure registry for the growth chart (label doubles as the axis title)
+CURVE_X_MEASURES = {
+    "turn": "main-agent turn count",
+    "cumulative_time": "cumulative time (s, ≥1)",
+    "busy_time": "busy time (s, active only, ≥1)",
+}
+
+
+def conversation_curves(pool: list[dict], conv_ids: set[str] | None = None,
+                        x_measure: str = "turn",
+                        ) -> dict[str, tuple[list[float], list[int]]]:
+    """Growth curve per conversation: y = each main turn's input context
+    tokens (log axis on the chart); x per x_measure:
+
+      'turn'            main-turn ordinal (1..n)
+      'cumulative_time' seconds since the conversation's first request at the
+                        turn's start — idle stretches included
+      'busy_time'       ACTIVE seconds elapsed at the turn's start (union of
+                        all earlier request intervals, main AND subagent)
+
+    Time measures clamp below 1 s UP to 1 so the first turn stays visible on
+    a log axis (never dropped). Unknown x_measure -> KeyError.
     conv_ids limits which conversations get curves (None = all in pool).
     Conversations with zero main turns are skipped (no curve to draw).
     """
-    curves: dict[str, tuple[list[int], list[int]]] = {}
+    if x_measure not in CURVE_X_MEASURES:
+        raise KeyError(f"unknown x_measure {x_measure!r}; "
+                       f"allowed: {sorted(CURVE_X_MEASURES)}")
+    curves: dict[str, tuple[list[float], list[int]]] = {}
     for cid, recs in group_by_conversation(pool).items():
         if conv_ids is not None and cid not in conv_ids:
             continue
         main = _main_turns_ordered(recs)
         if not main:
             continue
-        xs = list(range(1, len(main) + 1))
+        if x_measure == "turn":
+            xs: list[float] = list(range(1, len(main) + 1))
+        elif x_measure == "cumulative_time":
+            xs = [max(r["start_s"], 1.0) for r in main]
+        else:  # busy_time — sweep over ALL requests of the conversation
+            ordered = sorted(recs, key=lambda r: r["start_s"])
+            busy_by_uid = {r["uid"]: b
+                           for r, b in zip(ordered, busy_offsets(ordered))}
+            xs = [max(busy_by_uid[r["uid"]], 1.0) for r in main]
         ys = [r["in_tokens"] for r in main]
         curves[cid] = (xs, ys)
     return curves

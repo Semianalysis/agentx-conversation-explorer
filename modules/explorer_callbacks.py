@@ -12,7 +12,8 @@ from dash.exceptions import PreventUpdate
 from modules import api_client, records, theme
 from modules.arch import resolve_assumptions
 from modules.controls import NONE
-from modules.explorer_data import (augment_rows_with_compute,
+from modules.explorer_data import (CURVE_X_MEASURES,
+                                   augment_rows_with_compute,
                                    build_conversation_table,
                                    conversation_curves, sync_updates)
 from modules.explorer_layout import TABLE_COLUMNS
@@ -131,9 +132,11 @@ def register_explorer_callbacks(app) -> None:
         Output("at-explorer-chartopts-store", "data"),
         Input("at-explorer-xscale-radio", "value"),
         Input("at-explorer-onlysel-cl", "value"),
+        Input("at-explorer-xmeasure-radio", "value"),
     )
-    def coalesce_chartopts(xscale, onlysel):
-        return {"xscale": xscale, "only_selected": "only" in (onlysel or [])}
+    def coalesce_chartopts(xscale, onlysel, xmeasure):
+        return {"xscale": xscale, "only_selected": "only" in (onlysel or []),
+                "xmeasure": xmeasure or "turn"}
     @app.callback(
         Output("at-explorer-dataset-dd", "options"),
         Output("at-explorer-dataset-dd", "value"),
@@ -318,18 +321,22 @@ def register_explorer_callbacks(app) -> None:
                 if (selection or {}).get("slug") == slug else set()
             if opts.get("only_selected") and sel_ids:
                 wanted &= sel_ids
-            curves = conversation_curves(pool, conv_ids=wanted & set(ordinal))
+            x_measure = opts.get("xmeasure", "turn")
+            curves = conversation_curves(pool, conv_ids=wanted & set(ordinal),
+                                         x_measure=x_measure)
             return _growth_figure(curves, ordinal, sel_ids & set(curves), slug,
-                                  log_x=opts.get("xscale") == "log")
+                                  log_x=opts.get("xscale") == "log",
+                                  x_measure=x_measure)
         except Exception:
             logger.exception("explorer growth render failed")
             raise PreventUpdate
 
 
 def _growth_figure(curves: dict, ordinal: dict, sel_ids: set, slug: str,
-                   log_x: bool = False) -> go.Figure:
+                   log_x: bool = False, x_measure: str = "turn") -> go.Figure:
     """One gray None-separated pool trace (fast) + a colored trace per selected
     conversation. customdata rows = [ordinal, conv_id] for click-to-select."""
+    x_hover = ("turn %{x}" if x_measure == "turn" else "t=%{x:,.6g}s")
     fig = go.Figure()
     pool_x: list = []
     pool_y: list = []
@@ -345,7 +352,7 @@ def _growth_figure(curves: dict, ordinal: dict, sel_ids: set, slug: str,
             x=pool_x, y=pool_y, mode="lines",
             line=dict(color="rgba(120,120,140,0.30)", width=1),
             customdata=pool_cd,
-            hovertemplate=("conv #%{customdata[0]} — turn %{x}, "
+            hovertemplate=(f"conv #%{{customdata[0]}} — {x_hover}, "
                            "ctx %{y:,} tok<extra>click to select</extra>"),
             name="unselected",
         ))
@@ -355,7 +362,7 @@ def _growth_figure(curves: dict, ordinal: dict, sel_ids: set, slug: str,
             x=xs, y=ys, mode="lines",
             line=dict(color=color_for(cid), width=2.5),
             customdata=[[ordinal[cid], cid]] * len(xs),
-            hovertemplate=("conv #%{customdata[0]} — turn %{x}, "
+            hovertemplate=(f"conv #%{{customdata[0]}} — {x_hover}, "
                            "ctx %{y:,} tok<extra>click to deselect</extra>"),
             name=f"#{ordinal.get(cid, '?')}",
         ))
@@ -365,7 +372,7 @@ def _growth_figure(curves: dict, ordinal: dict, sel_ids: set, slug: str,
         + (f", {n_sel} selected" if n_sel else ""), title_size=14)
     band["showlegend"] = bool(sel_ids)
     fig.update_layout(**theme.base_layout(**band))
-    fig.update_xaxes(title_text="main-agent turn count", title_font_size=12,
+    fig.update_xaxes(title_text=CURVE_X_MEASURES[x_measure], title_font_size=12,
                      type=("log" if log_x else "linear"))
     fig.update_yaxes(type="log", title_text="context length (input tokens)",
                      title_font_size=12)
