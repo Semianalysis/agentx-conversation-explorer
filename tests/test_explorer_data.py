@@ -134,5 +134,33 @@ class TestApplySelection(unittest.TestCase):
             self.assertEqual(gates, {})
 
 
+class TestSyncUpdates(unittest.TestCase):
+    """Shared-dataset propagation: one value, N synced widgets."""
+
+    def setUp(self):
+        from modules.explorer_data import sync_updates
+        self.sync = sync_updates
+
+    def test_propagates_trigger_value_to_stale_widgets(self):
+        self.assertEqual(self.sync(["b", "a", "a"], 0), ("b", [1, 2]))
+        self.assertEqual(self.sync(["a", "b", "a"], 1), ("b", [0, 2]))
+
+    def test_converged_returns_none_stopping_the_echo(self):
+        self.assertIsNone(self.sync(["a", "a", "a"], 2))
+        self.assertIsNone(self.sync([None, None, None], 0))
+
+    def test_clearing_propagates_the_none_value(self):
+        # a cleared dropdown clears the others: None is a real value here,
+        # "no change" is signaled by index absence
+        self.assertEqual(self.sync([None, "a", "a"], 0), (None, [1, 2]))
+
+    def test_partial_agreement_updates_only_stale(self):
+        self.assertEqual(self.sync(["b", "b", "a"], 0), ("b", [2]))
+
+    def test_bad_index_raises(self):
+        with self.assertRaises(IndexError):
+            self.sync(["a"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

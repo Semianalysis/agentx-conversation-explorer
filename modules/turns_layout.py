@@ -14,10 +14,12 @@ from modules.records import DIMENSIONS
 def layout() -> html.Div:
     side = controls.sidebar([
         controls.label("Dataset",
-                       info_text="Pick which cached dataset to histogram. "
-                                 "Datasets are imported on the Overview tab. "
-                                 "An Explorer selection scopes these charts "
-                                 "to the selected conversations."),
+                       info_text="The dataset is SHARED state: every tab is a "
+                                 "viewport onto the same data, and picking a "
+                                 "dataset here switches all tabs. An Explorer "
+                                 "conversation selection also scopes these "
+                                 "charts. Models, roles, scale, and bins below "
+                                 "are viewport options — local to this tab."),
         controls.dropdown("at-turns-dataset-dd", "pick a cached dataset"),
         controls.label("Models (empty = all)",
                        info_text="Restrict the histograms to requests served "

@@ -6,19 +6,25 @@ from __future__ import annotations
 import logging
 
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback_context
+from dash import Input, Output, State, callback_context, no_update
 from dash.exceptions import PreventUpdate
 
 from modules import api_client, records, theme
 from modules.arch import resolve_assumptions
 from modules.controls import NONE
 from modules.explorer_data import (augment_rows_with_compute,
-                                   build_conversation_table, conversation_curves)
+                                   build_conversation_table,
+                                   conversation_curves, sync_updates)
 from modules.explorer_layout import TABLE_COLUMNS
 from modules.theme import color_for
 from modules.turns_callbacks import cached_dataset_options
 
 logger = logging.getLogger(__name__)
+
+# The dataset is GLOBAL state — every tab is a viewport onto the same data.
+# These dropdowns are three views of ONE value, synced both ways.
+_DATASET_DDS = ("at-explorer-dataset-dd", "at-turns-dataset-dd",
+                "at-corr-dataset-dd")
 
 
 def _annotate_sort_columns(sort_by: list[dict]) -> list[dict]:
@@ -81,6 +87,31 @@ def _register_sort_semantics(app, table_id: str, store_id: str) -> None:
 def register_explorer_callbacks(app) -> None:
     _register_sort_semantics(app, "at-explorer-conv-table", "at-explorer-sort-store")
     _register_sort_semantics(app, "at-deep-conv-table", "at-deep-sort-store")
+
+    @app.callback(
+        [Output(dd, "value", allow_duplicate=True) for dd in _DATASET_DDS],
+        [Input(dd, "value") for dd in _DATASET_DDS],
+        prevent_initial_call=True,
+    )
+    def sync_dataset(*values):
+        """Self-loop sync of the shared dataset across all tabs: whichever
+        dropdown the user changed wins; the echo of our own write arrives with
+        all values equal and stops the loop (sync_updates returns None)."""
+        try:
+            trig = callback_context.triggered_id
+            if trig not in _DATASET_DDS:
+                raise PreventUpdate
+            updates = sync_updates(list(values), _DATASET_DDS.index(trig))
+            if updates is None:
+                raise PreventUpdate
+            value, stale = updates
+            return [value if i in stale else no_update
+                    for i in range(len(_DATASET_DDS))]
+        except PreventUpdate:
+            raise
+        except Exception:
+            logger.exception("dataset sync failed")
+            raise PreventUpdate
 
     @app.callback(
         Output("at-explorer-chartopts-store", "data"),
