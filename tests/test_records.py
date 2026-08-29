@@ -1,7 +1,7 @@
 """Contract + invariant tests for record flattening."""
 import unittest
 
-from modules.records import DIMENSIONS, flatten_conversation, pool_models
+from modules.records import flatten_conversation, pool_models
 
 
 def _turn(i=0, model="claude-opus-4-8", in_t=100, cached=60, uncached=40, out=10,
@@ -87,10 +87,10 @@ class TestFlatten(unittest.TestCase):
         with self.assertRaises(ValueError):
             flatten_conversation("c1", {"nodes": []})
 
-    def test_dimension_fields_exist_on_records(self):
+    def test_token_fields_exist_on_records(self):
         recs = flatten_conversation("c1", {"nodes": [_turn(0)]})
-        for dim, spec in DIMENSIONS.items():
-            self.assertIn(spec["field"], recs[0], f"dimension {dim}")
+        for field in ("in_tokens", "uncached_tokens", "out_tokens"):
+            self.assertIn(field, recs[0])
 
     def test_pool_models_sorted_by_count(self):
         recs = flatten_conversation("c1", {"nodes": [

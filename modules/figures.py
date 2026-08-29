@@ -3,6 +3,8 @@
 Histograms are drawn as uniform-width bars over BIN INDEX (categorical), with
 edge labels on the ticks — plotly bars on a true log axis misbehave, and index
 bars make box-select return clean bin indices for the correlations bin picks.
+Bar HEIGHTS are computed by the caller (request counts in token-count mode,
+per-bin measure sums in positional mode) — the figure just draws them.
 """
 from __future__ import annotations
 
@@ -11,7 +13,8 @@ import math
 import plotly.graph_objects as go
 
 from modules import theme
-from modules.binning import bin_counts, edge_label, make_bins, value_stats
+from modules.binning import edge_label, value_stats
+from modules.theme import fmt_count
 
 
 def empty_figure(title: str, reason: str, height: int | None = 260) -> go.Figure:
@@ -27,7 +30,8 @@ def empty_figure(title: str, reason: str, height: int | None = 260) -> go.Figure
     return fig
 
 
-def _apply_index_ticks(fig: go.Figure, edges: list[float], log_x: bool) -> None:
+def _apply_index_ticks(fig: go.Figure, edges: list[float], log_x: bool,
+                       x_title: str) -> None:
     """Edge labels on the index axis (every ~n/8th bin boundary)."""
     n = len(edges) - 1
     tick_step = max(1, n // 8)
@@ -35,7 +39,7 @@ def _apply_index_ticks(fig: go.Figure, edges: list[float], log_x: bool) -> None:
     fig.update_xaxes(
         tickvals=[v - 0.5 for v in tickvals],
         ticktext=[edge_label(edges[min(v, n)]) for v in tickvals],
-        title_text=("tokens (log bins; 0→1)" if log_x else "tokens (linear bins)"),
+        title_text=x_title + (" (log bins; 0→1)" if log_x else " (linear bins)"),
         title_font_size=11,
     )
 
@@ -52,53 +56,50 @@ def _stats_annotation(fig: go.Figure, values: list[float]) -> None:
 
 
 def multi_histogram_figure(
-    pool_values: list[float],
+    edges: list[float],
+    pool_heights: list[float],
     title: str,
+    x_title: str,
+    y_title: str,
     log_x: bool,
-    n_bins: int,
     own_marks: list[tuple[list[int], str, str]],
     overlays: list[tuple[list[float], str, str]],
-    gates: dict | None = None,
+    stat_values: list[float] | None = None,
 ) -> go.Figure:
-    """Correlations histogram: the FULL pool as a gray step silhouette (bin
-    edges always come from the full pool — the chart never re-ranges), plus
+    """Correlations histogram over precomputed per-bin heights: the FULL pool
+    as a gray step silhouette (the chart never re-ranges), plus
 
-      own_marks: [(bins, color, name)] — selections CONTROLLING this
-        dimension; their picked bins are tinted at full pool height.
-      overlays: [(values, color, name)] — matched-request values of applied
-        selections controlling OTHER dimensions; drawn as colored bars
-        stacked on each other (explicit base under barmode=overlay).
+      own_marks: [(bins, color, name)] — on the selection chart, each
+        inspector's owned bins tinted at full pool height (bins are exclusive,
+        so tints never overlap).
+      overlays: [(heights, color, name)] — each selection's CONTRIBUTION to
+        every bar (member request counts, or member measure sums), drawn as
+        colored sections stacked on each other (explicit base under
+        barmode=overlay) — the size of a color's section is how much of that
+        bar correlates with that inspector's bins.
 
     A transparent full-height bar per bin is the topmost trace: it carries
     the combined hover text and makes ANY click inside a bin's column report
     that bin (clickData x = bin index).
     """
-    if not pool_values:
-        gate_txt = " → ".join(f"{k}={v}" for k, v in (gates or {}).items())
-        return empty_figure(title, f"0 rows after filters ({gate_txt or 'empty pool'})",
-                            height=None)
-
-    edges = make_bins(pool_values, n_bins, log_x)
-    pool_counts = bin_counts(pool_values, edges, log_x)
-    n = len(pool_counts)
+    n = len(edges) - 1
+    if len(pool_heights) != n:
+        raise ValueError(f"{len(pool_heights)} heights for {n} bins")
     idx = list(range(n))
-    max_c = max(pool_counts) or 1
-
-    overlay_counts = [(bin_counts(values, edges, log_x), color, name)
-                      for values, color, name in overlays]
+    max_h = max(pool_heights) or 1
 
     hover = []
     for i in idx:
         lines = [f"[{edge_label(edges[i])}, {edge_label(edges[i + 1])}) — "
-                 f"{pool_counts[i]:,} of all rows"]
-        lines += [f"{name}: {cts[i]:,} matched"
-                  for cts, _color, name in overlay_counts if cts[i]]
+                 f"{fmt_count(pool_heights[i])} {y_title}"]
+        lines += [f"{name}: {fmt_count(hts[i])}"
+                  for hts, _color, name in overlays if hts[i]]
         lines.append("click to select / deselect this bin")
         hover.append("<br>".join(lines))
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(  # full-pool silhouette (the grayed background)
-        x=idx, y=pool_counts, mode="lines",
+        x=idx, y=pool_heights, mode="lines",
         line=dict(color="#999", width=1.2, shape="hvh"),
         fill="tozeroy", fillcolor="rgba(150,150,150,0.20)",
         hoverinfo="skip", name="all rows",
@@ -108,25 +109,27 @@ def multi_histogram_figure(
         if not xs:
             continue
         fig.add_trace(go.Bar(
-            x=xs, y=[pool_counts[b] for b in xs],
+            x=xs, y=[pool_heights[b] for b in xs],
             marker_color=color, opacity=0.45, marker_line_width=0,
             hoverinfo="skip", name=f"{name} bins",
         ))
     base = [0.0] * n
-    for cts, color, name in overlay_counts:
+    for hts, color, name in overlays:
+        if len(hts) != n:
+            raise ValueError(f"overlay {name!r}: {len(hts)} heights for {n} bins")
         fig.add_trace(go.Bar(
-            x=idx, y=cts, base=list(base),
+            x=idx, y=hts, base=list(base),
             marker_color=color, marker_line_width=0, opacity=0.9,
             hoverinfo="skip", name=name,
         ))
-        base = [b + c for b, c in zip(base, cts)]
+        base = [b + h for b, h in zip(base, hts)]
     fig.add_trace(go.Bar(  # transparent click/hover target, topmost
-        x=idx, y=[max_c] * n, marker_color="rgba(0,0,0,0)",
+        x=idx, y=[max_h] * n, marker_color="rgba(0,0,0,0)",
         marker_line_width=0, hovertext=hover, hoverinfo="text", name="",
     ))
 
-    _apply_index_ticks(fig, edges, log_x)
-    fig.update_yaxes(title_text="requests", title_font_size=11)
+    _apply_index_ticks(fig, edges, log_x, x_title)
+    fig.update_yaxes(title_text=y_title, title_font_size=11)
     fig.update_layout(**theme.base_layout(
         title=dict(text=title, font=dict(size=13)),
         autosize=True,
@@ -135,7 +138,8 @@ def multi_histogram_figure(
         dragmode="select",
         selectdirection="h",
     ))
-    _stats_annotation(fig, pool_values)
+    if stat_values:
+        _stats_annotation(fig, stat_values)
     return fig
 
 

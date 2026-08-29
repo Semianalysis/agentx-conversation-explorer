@@ -1,18 +1,42 @@
-"""Tests for the Correlations selection-store state machine and bin matching."""
+"""Tests for the Correlations measure registry, exclusive-bin selection
+store, and membership matching."""
 import unittest
 
-from modules.correlations_data import (MAX_SELECTIONS, add_bin_range,
-                                       add_selection, bin_runs, bins_subset,
-                                       clear_selection, initial_store,
-                                       selection_color, set_live, toggle_bin,
-                                       toggle_on)
-from modules.figures import selection_to_bins
 from modules.binning import bin_index, make_bins
+from modules.correlations_data import (ALL_MEASURES, CHART_SLOTS,
+                                       DEFAULT_AXES, MAX_SELECTIONS,
+                                       X_MEASURES, Y_MEASURES, add_selection,
+                                       assign_bin, assign_bin_range, bin_runs,
+                                       clear_selection, initial_store,
+                                       measure_values, member_mask,
+                                       selection_color, set_live)
+from modules.figures import selection_to_bins
 
 
-def _rec(context=1000, new_input=100, output=50):
-    return {"in_tokens": context, "uncached_tokens": new_input,
-            "out_tokens": output}
+class TestMeasureRegistry(unittest.TestCase):
+    def test_defaults_and_shapes(self):
+        self.assertEqual(DEFAULT_AXES["x"], "token_count")
+        self.assertEqual(DEFAULT_AXES["y1"], "kv_cache_bytes")
+        self.assertEqual(DEFAULT_AXES["y2"], "new_input")
+        self.assertEqual(DEFAULT_AXES["y3"], "decode_output")
+        self.assertIn("turn_flops", Y_MEASURES)
+        for key, m in ALL_MEASURES.items():
+            self.assertTrue(m.get("info", "").strip(), f"{key} missing info")
+        self.assertEqual(Y_MEASURES["turn_flops"]["label"], "turn FLOPs")
+
+    def test_getters_read_enriched_rows(self):
+        row = {"seq": 7, "start_s": 100.0, "busy_s": 40.0, "kv_bytes": 5e9,
+               "uncached_tokens": 123, "out_tokens": 45, "flops": 1e12}
+        self.assertEqual(measure_values([row], "turn_number"), [7])
+        self.assertEqual(measure_values([row], "busy_time"), [40.0])
+        self.assertEqual(measure_values([row], "kv_cache_bytes"), [5e9])
+        self.assertEqual(measure_values([row], "turn_flops"), [1e12])
+
+    def test_token_count_sentinel_has_no_getter(self):
+        with self.assertRaises(ValueError):
+            measure_values([{}], "token_count")
+        with self.assertRaises(KeyError):
+            measure_values([{}], "kv_cache_bites")
 
 
 class TestSelectionStore(unittest.TestCase):
@@ -20,73 +44,68 @@ class TestSelectionStore(unittest.TestCase):
         s = initial_store()
         self.assertEqual(len(s["selections"]), 1)  # one section always present
         self.assertEqual(s["live"], s["selections"][0]["sid"])
-        self.assertIsNone(s["selections"][0]["dim"])
-        self.assertFalse(s["selections"][0]["on"])  # apply off while unused
+        self.assertIsNone(s["chart"])
 
-    def test_toggle_anchors_then_toggles(self):
-        s = toggle_bin(initial_store(), 0, "context", 5)
-        self.assertEqual(s["selections"][0]["dim"], "context")
+    def test_first_pick_anchors_the_shared_chart(self):
+        s = assign_bin(initial_store(), 0, "y2", 5)
+        self.assertEqual(s["chart"], "y2")
         self.assertEqual(s["selections"][0]["bins"], [5])
-        s = toggle_bin(s, 0, "context", 2)
-        self.assertEqual(s["selections"][0]["bins"], [2, 5])  # kept sorted
-        s = toggle_bin(s, 0, "context", 5)
-        self.assertEqual(s["selections"][0]["bins"], [2])
 
-    def test_removing_last_bin_unanchors_and_turns_apply_off(self):
-        s = toggle_bin(initial_store(), 0, "context", 5)
-        s = toggle_on(s, 0)
-        s = toggle_bin(s, 0, "context", 5)
-        sel = s["selections"][0]
-        self.assertIsNone(sel["dim"])
-        self.assertFalse(sel["on"])  # empty selection is never 'in use'
-        # section persists and is re-anchorable to a different dim
-        s = toggle_bin(s, 0, "output", 3)
-        self.assertEqual(s["selections"][0]["dim"], "output")
-
-    def test_click_on_other_dim_raises_with_hint(self):
-        s = toggle_bin(initial_store(), 0, "context", 5)
+    def test_click_on_other_chart_raises(self):
+        s = assign_bin(initial_store(), 0, "y1", 5)
         with self.assertRaises(ValueError):
-            toggle_bin(s, 0, "output", 1)
+            assign_bin(s, 0, "y3", 1)
 
-    def test_unknown_dim_or_sid_raise(self):
-        with self.assertRaises(KeyError):
-            toggle_bin(initial_store(), 0, "contxt", 1)
-        with self.assertRaises(KeyError):
-            toggle_bin(initial_store(), 99, "context", 1)
+    def test_bins_are_exclusive_between_inspectors(self):
+        s = assign_bin(initial_store(), 0, "y1", 5)
+        s = add_selection(s)                    # S2 armed
+        s = assign_bin(s, 1, "y1", 5)           # steals bin 5 from S1
+        self.assertEqual(s["selections"][0]["bins"], [])
+        self.assertEqual(s["selections"][1]["bins"], [5])
 
-    def test_add_bin_range_unions(self):
-        s = toggle_bin(initial_store(), 0, "context", 9)
-        s = add_bin_range(s, 0, "context", 2, 4)
-        self.assertEqual(s["selections"][0]["bins"], [2, 3, 4, 9])
+    def test_reclick_own_bin_releases_it(self):
+        s = assign_bin(initial_store(), 0, "y1", 5)
+        s = assign_bin(s, 0, "y1", 5)
+        self.assertEqual(s["selections"][0]["bins"], [])
+        self.assertIsNone(s["chart"])           # all empty -> unanchored
 
-    def test_add_selection_becomes_live_and_caps(self):
-        s = initial_store()
+    def test_unanchored_after_release_accepts_any_chart(self):
+        s = assign_bin(initial_store(), 0, "y1", 5)
+        s = assign_bin(s, 0, "y1", 5)           # release -> unanchored
+        s = assign_bin(s, 0, "y3", 2)           # new anchor allowed
+        self.assertEqual(s["chart"], "y3")
+
+    def test_range_claims_and_steals_but_never_releases(self):
+        s = assign_bin(initial_store(), 0, "y1", 3)
         s = add_selection(s)
-        self.assertEqual(len(s["selections"]), 2)
+        s = assign_bin_range(s, 1, "y1", 2, 4)
+        self.assertEqual(s["selections"][0]["bins"], [])
+        self.assertEqual(s["selections"][1]["bins"], [2, 3, 4])
+        s = assign_bin_range(s, 1, "y1", 3, 3)  # re-select own range: no-op
+        self.assertEqual(s["selections"][1]["bins"], [2, 3, 4])
+
+    def test_add_selection_arms_it_and_caps(self):
+        s = add_selection(initial_store())
         self.assertEqual(s["live"], s["selections"][-1]["sid"])
         while len(s["selections"]) < MAX_SELECTIONS:
             s = add_selection(s)
         with self.assertRaises(ValueError):
             add_selection(s)
 
-    def test_clear_empties_but_keeps_the_section(self):
-        s = toggle_bin(initial_store(), 0, "context", 5)
-        s = toggle_on(s, 0)
+    def test_clear_keeps_section_and_unanchors_when_last(self):
+        s = assign_bin(initial_store(), 0, "y1", 5)
         s = clear_selection(s, 0)
         self.assertEqual(len(s["selections"]), 1)   # never disappears
-        sel = s["selections"][0]
-        self.assertEqual((sel["dim"], sel["bins"], sel["on"]), (None, [], False))
+        self.assertEqual(s["selections"][0]["bins"], [])
+        self.assertIsNone(s["chart"])
+        # anchor survives while ANOTHER selection still holds bins
+        s = assign_bin(s, 0, "y1", 5)
+        s = add_selection(s)
+        s = assign_bin(s, 1, "y1", 7)
+        s = clear_selection(s, 0)
+        self.assertEqual(s["chart"], "y1")
 
-    def test_toggle_on_flips_per_selection(self):
-        s = add_selection(toggle_bin(initial_store(), 0, "context", 5))
-        s = toggle_bin(s, 1, "output", 2)
-        s = toggle_on(s, 1)
-        self.assertFalse(s["selections"][0]["on"])  # independent toggles
-        self.assertTrue(s["selections"][1]["on"])
-        s = toggle_on(s, 1)
-        self.assertFalse(s["selections"][1]["on"])
-
-    def test_set_live(self):
+    def test_set_live_arms(self):
         s = add_selection(initial_store())
         s = set_live(s, 0)
         self.assertEqual(s["live"], 0)
@@ -95,50 +114,41 @@ class TestSelectionStore(unittest.TestCase):
 
     def test_mutations_are_copy_on_write(self):
         before = initial_store()
-        toggle_bin(before, 0, "context", 1)
+        assign_bin(before, 0, "y1", 1)
         self.assertEqual(before["selections"][0]["bins"], [])
+        self.assertIsNone(before["chart"])
 
     def test_selection_colors_stable_and_distinct(self):
         self.assertEqual(selection_color(3), selection_color(3))
         self.assertNotEqual(selection_color(0), selection_color(1))
 
+    def test_chart_slots(self):
+        self.assertEqual(CHART_SLOTS, ("y1", "y2", "y3"))
+        with self.assertRaises(KeyError):
+            assign_bin(initial_store(), 0, "y9", 1)
 
-class TestBinsSubset(unittest.TestCase):
+
+class TestMemberMask(unittest.TestCase):
     def setUp(self):
-        # values 1..1000 over 10 log bins; context field drives membership
-        self.records = [_rec(context=v) for v in (1, 2, 30, 500, 999, 0)]
-        self.values = [r["in_tokens"] for r in self.records]
+        self.values = [1.0, 2.0, 30.0, 500.0, 999.0, 0.0]
         self.edges = make_bins(self.values, 10, log_x=True)
 
-    def test_matches_follow_bin_index(self):
-        bins = [bin_index(self.edges, 30, True)]
-        subset, gates = bins_subset(self.records, "context", self.edges,
-                                    bins, log_x=True)
-        self.assertEqual([r["in_tokens"] for r in subset], [30])
-        self.assertEqual(gates, {"n_pool": 6, "n_matched": 1})
+    def test_mask_follows_bin_index(self):
+        b30 = bin_index(self.edges, 30.0, True)
+        mask = member_mask(self.values, self.edges, [b30], True)
+        self.assertEqual([v for v, m in zip(self.values, mask) if m], [30.0])
 
     def test_zero_clamps_into_first_bin(self):
-        subset, _ = bins_subset(self.records, "context", self.edges, [0], True)
-        vals = sorted(r["in_tokens"] for r in subset)
-        self.assertIn(0, vals)   # the zero value clamps to 1 -> bin 0
-        self.assertIn(1, vals)
-
-    def test_multiple_disjoint_bins(self):
-        b30 = bin_index(self.edges, 30, True)
-        b500 = bin_index(self.edges, 500, True)
-        subset, _ = bins_subset(self.records, "context", self.edges,
-                                sorted({b30, b500}), True)
-        self.assertEqual(sorted(r["in_tokens"] for r in subset), [30, 500])
+        mask = member_mask(self.values, self.edges, [0], True)
+        matched = sorted(v for v, m in zip(self.values, mask) if m)
+        self.assertIn(0.0, matched)
+        self.assertIn(1.0, matched)
 
     def test_empty_bins_and_bad_indices_raise(self):
         with self.assertRaises(ValueError):
-            bins_subset(self.records, "context", self.edges, [], True)
+            member_mask(self.values, self.edges, [], True)
         with self.assertRaises(ValueError):
-            bins_subset(self.records, "context", self.edges, [99], True)
-
-    def test_unknown_dim_raises(self):
-        with self.assertRaises(KeyError):
-            bins_subset(self.records, "contxt", self.edges, [0], True)
+            member_mask(self.values, self.edges, [99], True)
 
 
 class TestBinHelpers(unittest.TestCase):
@@ -148,19 +158,10 @@ class TestBinHelpers(unittest.TestCase):
         self.assertEqual(bin_runs([3, 3, 2]), [(2, 3)])  # dedup + sort
 
     def test_selection_to_bins(self):
-        # a box from x=1.6 to x=4.2 covers bars 2, 3, 4 (bars sit at ints)
         self.assertEqual(selection_to_bins((1.6, 4.2), 60), [2, 3, 4])
-        # a tiny box inside one bar's column selects exactly that bar
         self.assertEqual(selection_to_bins((2.3, 2.4), 60), [2])
-        # clamped to the axis; fully off-axis selects nothing
         self.assertEqual(selection_to_bins((-5.0, 0.2), 60), [0])
         self.assertEqual(selection_to_bins((70.0, 80.0), 60), [])
-
-    def test_bin_index_matches_counts_rules(self):
-        edges = make_bins([1, 1000], 10, log_x=True)
-        self.assertEqual(bin_index(edges, 0, True), 0)     # clamps up
-        with self.assertRaises(ValueError):
-            bin_index(edges, 10_000, True)                 # beyond last edge
 
 
 if __name__ == "__main__":

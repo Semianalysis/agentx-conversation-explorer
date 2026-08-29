@@ -1,8 +1,8 @@
-"""Tests for Turns-tab pure helpers: filters, binning, stats."""
+"""Tests for the pure binning helpers: filters, binning, stats."""
 import unittest
 
-from modules.binning import (bin_counts, dimension_values, filter_records,
-                                make_bins, value_stats)
+from modules.binning import (bin_counts, bin_weighted, filter_records,
+                             make_bins, value_stats)
 
 
 def _rec(model="m1", role="main", in_t=100, unc=40, out=10):
@@ -31,9 +31,12 @@ class TestFilters(unittest.TestCase):
         with self.assertRaises(KeyError):
             filter_records(self.pool, {"modles": ["m1"]})  # typo must be loud
 
-    def test_unknown_dimension_raises(self):
-        with self.assertRaises(KeyError):
-            dimension_values(self.pool, "contxt")
+    def test_bin_weighted_sums_per_bin(self):
+        edges = make_bins([0.0, 10.0], 2, log_x=False)
+        sums = bin_weighted([1.0, 2.0, 8.0], edges, False, [10.0, 5.0, 7.0])
+        self.assertEqual(sums, [15.0, 7.0])
+        with self.assertRaises(ValueError):  # weights must align with values
+            bin_weighted([1.0], edges, False, [1.0, 2.0])
 
 
 class TestBinning(unittest.TestCase):

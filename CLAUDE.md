@@ -37,24 +37,33 @@ Independent project — it imitates the InferenceX Explorer tab of
   Deep-dive's list.
 - **Turns tab** — DROPPED at bld 19 (user 2026-08-29: Correlations covers it). Its
   pure binning helpers live on as modules/binning.py.
-- **Correlations tab** (redesigned bld 17, reworked bld 19) — bin-selection
-  inspectors. Click bins (or box-select) on ONE histogram to build the LIVE
-  selection; that chart becomes its controlling histogram (first bin anchors it;
-  clicking a picked bin removes it, removing the last un-anchors). Each inspector
-  section carries its OWN "apply: on/off" toggle (conditions the other two
-  histograms on its matched requests, drawn in its color, STACKED across applied
-  selections) and a Clear button color-coded to the selection (empties the section;
-  sections NEVER disappear — at least one always exists, an unused one is just empty
-  with apply off). "Add selection" sits below the sections. Guidance text: a comment
-  above Selections ("click a bar in a histogram to add or remove from current
-  selection") and a status line ("selections are in <chart(s)>" / "you may choose to
-  begin a selection in any chart"). The full pool always stays as a gray step
-  silhouette and bin edges always come from the full pool — conditioned charts NEVER
-  re-range. Inspector sections show per-bin detail + conditional stats of the other
-  dims via a clickable mini-strip of all bins. Selections RESET when dataset / model
-  / role / x-scale / Explorer selection change (bin indices are positions in the
-  current binning). State machine is pure in correlations_data.py; charts flex-fill
-  the window height.
+- **Correlations tab** (redesigned bld 17/19, measures + cursor model bld 20) —
+  three histogram charts (slots y1/y2/y3) with a deep-dive-style measure matrix:
+  x mode ∈ {token count, turn #, cumulative time, busy time} (+ log/linear bins
+  radio), y measures ∈ {KV cache size (y1 default), new input (y2), decode output
+  (y3), turn FLOPs}. token-count mode = each chart bins its OWN y measure, bar
+  height = request count; positional modes = all charts share x bins, bar height =
+  per-bin SUM of each chart's measure. Measures read the ENRICHED rows from
+  deepdive_data.aggregate_selection (memoized in correlations_callbacks), so KV
+  bytes / FLOPs follow the global serving assumptions. SELECTIONS: color-coded
+  inspectors partition ONE shared selection chart (first pick anchors it); bins are
+  EXCLUSIVE — picking with another inspector's armed cursor transfers a bin, picking
+  an owned bin releases it; all inspectors empty → unanchored, first pick may land
+  anywhere. Click an inspector's ➤ arrow to ARM it: chart wrappers get a
+  corr-cursor-<k> class (assets/corr_cursors.css, generated from PALETTE) that
+  recolors the mouse cursor over the selection chart (over all charts while
+  unanchored); non-selection charts keep the default cursor and IGNORE clicks.
+  Conditioning ALWAYS applies (no apply button): each non-empty selection's
+  contribution stacks on the other charts in its color (member counts, or member
+  measure sums in positional mode) — section size = how much of that bar correlates.
+  Full pool stays a gray step silhouette; edges always from the full pool (never
+  re-range). Inspector: colored Clear (section stays; never disappears, ≥1 always),
+  clickable all-bins strip (other owners' bins shown faded in THEIR color; clicking
+  transfers), per-run detail + Σ contribution per other chart. "Add selection" below
+  the sections. Status line: "selections are in <selection-chart measure>" / "you
+  may choose to begin a selection in any chart". Selections RESET when dataset /
+  models / roles / measures / x-scale / assumptions / Explorer selection change.
+  State machine pure in correlations_data.py; charts flex-fill the window height.
 - **Trace deep-dive tab** — implied FLOPs / memory / network aggregated over the
   CHECKED conversations (nothing checked = all). The conversation list is the SAME
   OBJECT as the Explorer list: one data callback feeds both tables identical rows, one
