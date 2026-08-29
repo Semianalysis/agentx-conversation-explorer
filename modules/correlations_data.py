@@ -75,6 +75,12 @@ Y_MEASURES = {
              "architecture and KV precision (from the Explorer assumption "
              "bar).",
         getter=lambda p: p["kv_bytes"]),
+    "kv_cache_tokens": dict(
+        label="KV cache (tokens)",
+        info="Context tokens held in the KV cache — the request's total "
+             "input (cached + new). Architecture-independent; the byte size "
+             "is this times KV bytes/token under the assumptions.",
+        getter=lambda p: p["in_tokens"]),
     "new_input": dict(
         label="new input (uncached tokens)",
         info="Uncached input tokens — new text (user message, tool results, "

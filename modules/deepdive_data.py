@@ -76,6 +76,26 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
             "wall_s_sum": wall_s_sum, "n_convs": len(conv_ids)}
 
 
+def zoom_member_uids(per_request: list[dict], x_key: str, y_key: str,
+                     window_x: list[float], window_y: list[float],
+                     x_scale: str) -> set[str]:
+    """uids of the requests inside the magnifier window: x measure within
+    window_x AND the MAGNIFIED chart's y measure within window_y (both
+    windows in axis units — log10 for log axes; y measures are always log).
+    The other charts gray out everything not in this set."""
+    from modules.measures import ALL_MEASURES, axis_units  # dash-free
+
+    xg = ALL_MEASURES[x_key]["getter"]
+    yg = ALL_MEASURES[y_key]["getter"]
+    out = set()
+    for p in per_request:
+        ax = axis_units(xg(p), x_scale)
+        ay = axis_units(yg(p), "log")
+        if window_x[0] <= ax <= window_x[1] and window_y[0] <= ay <= window_y[1]:
+            out.add(p["uid"])
+    return out
+
+
 def grouped_series(per_request: list[dict], x_key: str, y_key: str,
                    n_bins: int = 60) -> dict:
     """Mean / min / max of a y measure ACROSS conversations as a function of x.

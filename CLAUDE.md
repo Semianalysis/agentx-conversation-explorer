@@ -77,7 +77,17 @@ Independent project — it imitates the InferenceX Explorer tab of
   Scale rule: ordinals (conv #, turn #) linear; every magnitude (time/tokens/bytes/
   FLOPs) log with values clamped UP to 1 unit so zeros/sub-unit values stay visible at
   the axis floor. An x-scale radio (auto/linear/log, bld 17) can override the x
-  measure's natural scale; the three charts share one range-locked x axis either way. Dataset + assumptions come from Explorer ("any" → DEFAULT_ASSUMPTIONS
+  measure's natural scale; the three charts share one range-locked x axis either way.
+  MAGNIFIER (bld 23): click a point → that chart zooms 5× around it (zoom_window,
+  clamped inside the full range); the other two charts keep their ranges but gray
+  points outside the window (member = x AND magnified-chart y inside; marker mode
+  only — line/grouped modes aren't grayed). Click a point ON the magnified chart →
+  right-column point inspector (sizes: context/cached/midfill ISL/OSL, timing, busy,
+  KV, prefill/decode/turn FLOPs, plus the assumptions it's priced under: TP/PP/DP,
+  EP note, precisions, MFU/MBU, 'disaggregation: none assumed'). Double-click
+  (plotly autorange relayout) cancels. The 'Single-GPU-equivalent time' card was
+  REMOVED from the right panel at the user's request (the table's sustained-GPU
+  columns remain). Dataset + assumptions come from Explorer ("any" → DEFAULT_ASSUMPTIONS
   in arch.py).
 - Purpose: explore compute activity and configuration potential implied by real agent traces.
 

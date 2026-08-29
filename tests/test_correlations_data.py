@@ -20,13 +20,16 @@ class TestMeasureRegistry(unittest.TestCase):
         self.assertEqual(DEFAULT_AXES["y2"], "new_input")
         self.assertEqual(DEFAULT_AXES["y3"], "decode_output")
         self.assertIn("turn_flops", Y_MEASURES)
+        self.assertIn("kv_cache_tokens", Y_MEASURES)  # token-count KV choice
         for key, m in ALL_MEASURES.items():
             self.assertTrue(m.get("info", "").strip(), f"{key} missing info")
         self.assertEqual(Y_MEASURES["turn_flops"]["label"], "turn FLOPs")
 
     def test_getters_read_enriched_rows(self):
         row = {"seq": 7, "start_s": 100.0, "busy_s": 40.0, "kv_bytes": 5e9,
-               "uncached_tokens": 123, "out_tokens": 45, "flops": 1e12}
+               "in_tokens": 2000, "uncached_tokens": 123, "out_tokens": 45,
+               "flops": 1e12}
+        self.assertEqual(measure_values([row], "kv_cache_tokens"), [2000])
         self.assertEqual(measure_values([row], "turn_number"), [7])
         self.assertEqual(measure_values([row], "busy_time"), [40.0])
         self.assertEqual(measure_values([row], "kv_cache_bytes"), [5e9])

@@ -107,6 +107,30 @@ def measure_series(per_request: list[dict], key: str) -> list[float]:
     return [getter(p) for p in per_request]
 
 
+def zoom_window(center: float, full_range: list[float],
+                factor: float = 5.0) -> list[float]:
+    """A window 1/factor the width of full_range, centered on `center` but
+    clamped to stay inside it (both in AXIS units: log10 for a log axis).
+    factor <= 1 returns the full range unchanged."""
+    lo, hi = full_range
+    if hi <= lo:
+        raise ValueError(f"degenerate range {full_range}")
+    w = (hi - lo) / factor
+    if w >= hi - lo:
+        return [lo, hi]
+    c = min(max(center, lo + w / 2), hi - w / 2)
+    return [c - w / 2, c + w / 2]
+
+
+def axis_units(value: float, scale: str) -> float:
+    """Data value -> axis units (log10 on a log axis, identity on linear)."""
+    if scale == "log":
+        if value <= 0:
+            raise ValueError(f"log axis cannot place non-positive {value}")
+        return math.log10(value)
+    return value
+
+
 def shared_axis_range(values: list[float], scale: str) -> list[float]:
     """Explicit plotly axis range covering `values`, padded ~2% per side so
     extreme points stay visible. Locks the three deep-dive charts to one
