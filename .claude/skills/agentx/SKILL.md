@@ -1,6 +1,6 @@
 ---
 name: agentx
-description: Resume work on the AgentX Conversation Explorer. Orients on build / git / data-cache / test / server state, reports one compact status block, then continues the user's task under the project's standing rules (bump APP_BUILD on every change, commit+push, user runs the server).
+description: Resume work on the AgentX Conversation Explorer. Orients on build / git / data-cache / test / server state, reports one compact status block, then continues the user's task under the project's standing rules (bump APP_BUILD on every change, ship via PR, user runs the server).
 ---
 
 # Resume — AgentX Conversation Explorer
@@ -13,7 +13,8 @@ said "resume", ask nothing and summarize where the last session left off from me
 
 1. **Build + code state**: Read `modules/version.py` (APP_BUILD). Run
    `git status -sb` and `git log --oneline -3` — note dirty files and ahead/behind
-   vs `origin/main` (https://github.com/SemiTanj/agentx-data-explorer).
+   vs `origin/main` (https://github.com/Semianalysis/agentx-data-explorer — the
+   company org repo, canonical since 2026-08-29).
 2. **Data cache**: count `data/*/conversations/*.json` per dataset (expect 393 each
    for cc-traces-weka-062126 and -256k). If empty: Overview tab → Import + Download
    traces refills it from the InferenceX API.
@@ -30,8 +31,12 @@ said "resume", ask nothing and summarize where the last session left off from me
 
 ## Standing rules (enforce without being asked)
 
-- **Bump `modules/version.py` APP_BUILD on EVERY app change**, then commit and push
-  to origin (commit message ends with the Claude co-author line).
+- **Bump `modules/version.py` APP_BUILD on EVERY app change** (commit message ends
+  with the Claude co-author line).
+- **Ship via PR — direct pushes to main are rejected** (org rules: PRs required +
+  'Supply-chain cooldown check' workflow). Flow: commit on a `bld-N` branch, push,
+  `gh pr create`, `gh pr merge --merge --auto`, wait for the merge, then sync main
+  and delete the branch.
 - The user runs `python app.py` themselves. Verify changes with a temporary
   background instance, then STOP it and confirm port 8050 is free.
 - Wording: "Conversation Explorer" / "conversations" — never "Trace Explorer".
