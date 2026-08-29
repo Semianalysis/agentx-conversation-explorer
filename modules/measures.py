@@ -88,7 +88,7 @@ Y_MEASURES = {
              "counts, not measured.",
         getter=lambda p: _clamp1(p["cum_flops"])),
     "current_flops": dict(
-        label="request FLOPs", scale="log", cumulative=False,
+        label="turn FLOPs", scale="log", cumulative=False,
         info="Implied FLOPs of this single request (prefill + decode) under "
              "the selected architecture.",
         getter=lambda p: _clamp1(p["flops"])),

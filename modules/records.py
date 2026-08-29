@@ -31,13 +31,6 @@ logger = logging.getLogger(__name__)
 
 _TURN_REQUIRED = ("in", "cached", "uncached", "out", "startS", "endS", "model")
 
-# Dimension registry — one source of truth for the three analysis axes.
-DIMENSIONS = {
-    "context": {"label": "Context length (input tokens / request)", "field": "in_tokens"},
-    "new_input": {"label": "New (uncached) input tokens / request", "field": "uncached_tokens"},
-    "output": {"label": "Output (decode) tokens / request", "field": "out_tokens"},
-}
-
 
 def _validate_turn(node: dict, uid: str) -> None:
     missing = [k for k in _TURN_REQUIRED if node.get(k) is None]

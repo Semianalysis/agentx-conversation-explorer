@@ -1,20 +1,83 @@
-"""Correlations tab layout: build color-coded bin SELECTIONS on one histogram
-each; each selection's own apply toggle conditions the other histograms on
-its matched requests. Inspector sections (one per selection, never fewer
-than one) live in the left panel and are rendered by the callbacks; 'Add
-selection' always sits below them; the three histograms flex-fill the window
-height. All Correlations dcc.Stores live here.
+"""Correlations tab layout: three histogram charts (slots y1/y2/y3) with a
+deep-dive-style measure matrix (x mode + one y measure per chart), and
+color-coded bin SELECTIONS on one shared selection chart. Conditioning
+always applies: every non-empty selection stacks its contribution on the
+other charts. Inspector sections (one per selection, never fewer than one)
+are rendered by the callbacks; 'Add selection' always sits below them; the
+charts flex-fill the window height. Chart wrappers get a corr-cursor-<k>
+class (assets/corr_cursors.css) so the armed inspector's colored pick-cursor
+shows exactly where a click will land. All Correlations dcc.Stores live here.
 """
 from __future__ import annotations
 
 from dash import dcc, html
 
 from modules import controls
-from modules.correlations_data import initial_store
-from modules.records import DIMENSIONS
+from modules.correlations_data import (ALL_MEASURES, CHART_SLOTS, DEFAULT_AXES,
+                                       X_MEASURES, Y_MEASURES, initial_store)
 from modules.theme import F_SMALL, GRAPH_CONFIG
 
-_BTN_STYLE = {"fontSize": "12px", "padding": "3px 8px"}
+_ROW_H = "24px"
+
+_AXIS_HEADER_INFO = {
+    "x": "Binning mode shared by all three charts: token count = each chart "
+         "bins its own y measure and counts requests; turn # / times = "
+         "shared positional bins where bars become per-bin SUMS of each "
+         "chart's measure.",
+    "y1": "Measure of the top chart.",
+    "y2": "Measure of the middle chart.",
+    "y3": "Measure of the bottom chart.",
+}
+
+
+def _axis_radio(id_: str, allowed: dict, default: str) -> dcc.RadioItems:
+    """One matrix column: a radio per measure row, disabled where the measure
+    doesn't apply to this axis (option counts identical -> rows align)."""
+    return dcc.RadioItems(
+        id=id_,
+        options=[{"label": "", "value": k, "disabled": k not in allowed}
+                 for k in ALL_MEASURES],
+        value=default,
+        labelStyle={"display": "block", "height": _ROW_H, "margin": "0",
+                    "textAlign": "center"},
+        style={"width": "30px"},
+    )
+
+
+def _measure_matrix() -> html.Div:
+    header_style = {"fontSize": "11px", "fontWeight": "700", "height": "20px",
+                    "textAlign": "center"}
+    label_col = html.Div(
+        [html.Div("measure", style=dict(header_style, textAlign="left"))] + [
+            html.Div(
+                [html.Span(m["label"],
+                           style={"flex": "1 1 auto", "minWidth": "0",
+                                  "whiteSpace": "nowrap", "overflow": "hidden",
+                                  "textOverflow": "ellipsis"}),
+                 controls.info(m["info"])],
+                title=m["info"],
+                style={"fontSize": "11px", "height": _ROW_H,
+                       "display": "flex", "alignItems": "center",
+                       "color": "#333"})
+            for m in ALL_MEASURES.values()
+        ],
+        style={"flex": "1 1 auto", "minWidth": "0"},
+    )
+    axis_cols = [
+        html.Div([html.Div(name, title=_AXIS_HEADER_INFO[name],
+                           style=dict(header_style, cursor="help")),
+                  _axis_radio(f"at-corr-{name}-radio", allowed,
+                              DEFAULT_AXES[name])],
+                 style={"flex": "0 0 30px"})
+        for name, allowed in (("x", X_MEASURES), ("y1", Y_MEASURES),
+                              ("y2", Y_MEASURES), ("y3", Y_MEASURES))
+    ]
+    return html.Div(
+        style={"display": "flex", "gap": "2px", "padding": "6px",
+               "border": "1px solid #ddd", "borderRadius": "6px",
+               "background": "white", "marginTop": "4px"},
+        children=[label_col] + axis_cols,
+    )
 
 
 def layout() -> html.Div:
@@ -24,8 +87,8 @@ def layout() -> html.Div:
                                  "viewport onto the same data, and picking a "
                                  "dataset here switches all tabs. An Explorer "
                                  "conversation selection also scopes these "
-                                 "charts. Models, roles, scale, and the "
-                                 "selections below are viewport options — "
+                                 "charts. Models, roles, measures, scale, and "
+                                 "the selections below are viewport options — "
                                  "local to this tab."),
         controls.dropdown("at-corr-dataset-dd", "pick a cached dataset"),
         controls.label("Models (empty = all)",
@@ -44,14 +107,21 @@ def layout() -> html.Div:
             value=["main", "subagent"],
             style={"fontSize": F_SMALL},
         ),
+        controls.label("Axes — one x mode, one measure per chart",
+                       info_text="Like the Deep-dive matrix: the x column "
+                                 "picks the shared binning mode, y1/y2/y3 "
+                                 "pick each chart's measure. Hover a measure "
+                                 "name for what it means. Changing any of "
+                                 "them re-bins the charts, so selections "
+                                 "reset."),
+        _measure_matrix(),
         controls.label("X scale",
                        info_text="log bins: geometric bin edges — right for "
-                                 "token counts spanning orders of magnitude "
-                                 "(zeros land in the first bin, labeled 0→1). "
+                                 "values spanning orders of magnitude (zeros "
+                                 "land in the first bin, labeled 0→1). "
                                  "linear bins: equal-width edges. Changing "
                                  "this re-bins the charts, so selections "
-                                 "reset (bin positions would otherwise refer "
-                                 "to different token ranges)."),
+                                 "reset."),
         dcc.RadioItems(
             id="at-corr-xscale-radio",
             options=[{"label": " log bins", "value": "log"},
@@ -63,21 +133,25 @@ def layout() -> html.Div:
                  style={"fontSize": "11px", "color": "#666", "marginTop": "14px",
                         "fontStyle": "italic"}),
         controls.label("Selections",
-                       info_text="Click bins (or box-select) on ONE histogram "
-                                 "to build the live selection — that chart "
-                                 "becomes its controlling histogram; clicking "
-                                 "a picked bin again removes it. Each "
-                                 "selection below shows per-bin detail and a "
-                                 "clickable strip to add/remove bins. Its "
-                                 "'apply' toggle draws its matching requests "
-                                 "on the OTHER histograms (stacked, in the "
-                                 "selection's color) over the gray full "
-                                 "distribution; its color-coded Clear button "
-                                 "empties it (the section stays). 'Add "
-                                 "selection' below starts another color for "
-                                 "side-by-side comparison. Selections reset "
-                                 "when the dataset, filters, x scale, or "
-                                 "Explorer selection change."),
+                       info_text="Inspectors partition the bins of ONE "
+                                 "selection chart (the chart of your first "
+                                 "pick) — a bin belongs to at most one "
+                                 "inspector, and picking it with another "
+                                 "inspector's cursor transfers it. Click an "
+                                 "inspector's colored arrow to ARM it: the "
+                                 "mouse cursor takes its color over the "
+                                 "selection chart (over every chart while "
+                                 "nothing is selected yet — the first pick "
+                                 "may land anywhere; other charts keep the "
+                                 "default cursor and ignore clicks). "
+                                 "Conditioning always applies: each "
+                                 "selection's matching requests stack on the "
+                                 "OTHER charts in its color, section size = "
+                                 "how much of that bar correlates. The "
+                                 "color-coded Clear empties a section (it "
+                                 "stays). Selections reset when the dataset, "
+                                 "filters, measures, x scale, assumptions, "
+                                 "or Explorer selection change."),
         html.Div(id="at-corr-selection-status",
                  style={"fontSize": "11px", "color": "#666",
                         "margin": "0 0 4px"}),
@@ -86,9 +160,10 @@ def layout() -> html.Div:
                         "whiteSpace": "pre-wrap"}),
         html.Div(id="at-corr-inspectors"),
         html.Button("Add selection", id="at-corr-newsel-btn", n_clicks=0,
-                    title="Add another color-coded selection and make it "
-                          "live (bin clicks edit the live selection).",
-                    style={**_BTN_STYLE, "marginTop": "8px"}),
+                    title="Add another color-coded selection and arm it "
+                          "(its cursor does the next bin picks).",
+                    style={"fontSize": "12px", "padding": "3px 8px",
+                           "marginTop": "8px"}),
         html.Div(id="at-corr-gate-status",
                  style={"fontSize": "12px", "color": "#666", "marginTop": "16px",
                         "fontFamily": "monospace", "whiteSpace": "pre-wrap"}),
@@ -99,17 +174,19 @@ def layout() -> html.Div:
                "flexDirection": "column", "overflow": "hidden",
                "padding": "4px 10px", "gap": "2px"},
         children=[
-            # each histogram takes a third of the window height; responsive
-            # figures follow their container on resize
-            html.Div(dcc.Graph(id=f"at-corr-graph-{dim}", config=GRAPH_CONFIG,
+            # each histogram takes a third of the window height; the wrapper
+            # id carries the corr-cursor-<k> class for the armed inspector
+            html.Div(dcc.Graph(id=f"at-corr-graph-{slot}", config=GRAPH_CONFIG,
                                style={"height": "100%", "width": "100%"}),
+                     id=f"at-corr-wrap-{slot}",
                      style={"flex": "1 1 0%", "minHeight": "0"})
-            for dim in DIMENSIONS
+            for slot in CHART_SLOTS
         ],
     )
 
     stores = [
         dcc.Store(id="at-corr-filter-store"),
+        dcc.Store(id="at-corr-axes-store"),
         dcc.Store(id="at-corr-selections-store", data=initial_store()),
     ]
     return html.Div(id="at-corr-tab", style={"height": "100%"},

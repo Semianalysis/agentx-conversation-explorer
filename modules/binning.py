@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import math
 
-from modules.records import DIMENSIONS
-
 _FILTER_KEYS = {"models", "roles"}
 
 
@@ -33,12 +31,6 @@ def filter_records(records: list[dict], filters: dict) -> tuple[list[dict], dict
         out = [r for r in out if r["role"] in allowed]
     gates["n_role"] = len(out)
     return out, gates
-
-
-def dimension_values(records: list[dict], dim: str) -> list[float]:
-    """Extract one dimension's values. Unknown dim -> KeyError."""
-    field = DIMENSIONS[dim]["field"]
-    return [r[field] for r in records]
 
 
 def make_bins(values: list[float], n_bins: int, log_x: bool) -> list[float]:
@@ -87,6 +79,18 @@ def bin_counts(values: list[float], edges: list[float], log_x: bool) -> list[int
     for v in values:
         counts[bin_index(edges, v, log_x)] += 1
     return counts
+
+
+def bin_weighted(values: list[float], edges: list[float], log_x: bool,
+                 weights: list[float]) -> list[float]:
+    """Sum of weights per bin (bin_index rules): the 'how much happened in
+    this bin' histogram. len(weights) must match len(values)."""
+    if len(weights) != len(values):
+        raise ValueError(f"{len(weights)} weights for {len(values)} values")
+    sums = [0.0] * (len(edges) - 1)
+    for v, w in zip(values, weights):
+        sums[bin_index(edges, v, log_x)] += w
+    return sums
 
 
 def _bisect(edges: list[float], x: float) -> int:
