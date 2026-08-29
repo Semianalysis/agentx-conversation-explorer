@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "C:\\Users\\tanj_xpd8pfd\\Documents\\Business-Helper"
+    ],
+    "allow": [
+      "Read",
+      "WebFetch(domain:inferencex.semianalysis.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:objects.githubusercontent.com)",
+      "Bash(python *)",
+      "Bash(python)",
+      "Bash(py *)",
+      "Bash(pip *)",
+      "Bash(uv *)",
+      "Bash(pytest *)",
+      "Bash(curl *)",
+      "Bash(node *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(mkdir *)",
+      "Bash(dir *)",
+      "Bash(ls *)",
+      "Bash(for *)",
+      "Bash(echo *)",
+      "Bash(sleep *)",
+      "Bash(tail *)",
+      "Bash(head *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
+      "Bash(taskkill *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(python *)",
+      "PowerShell(py *)",
+      "PowerShell(pip *)",
+      "PowerShell(uv *)",
+      "PowerShell(pytest *)",
+      "PowerShell(curl *)",
+      "PowerShell(node *)",
+      "PowerShell(npm *)",
+      "PowerShell(npx *)",
+      "PowerShell(git *)",
+      "PowerShell(gh *)"
+    ]
+  }
+}
