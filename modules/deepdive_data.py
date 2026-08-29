@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 from modules.arch import DTYPE_BYTES, conversation_compute
-from modules.explorer_data import group_by_conversation
+from modules.explorer_data import busy_offsets, group_by_conversation
 
 
 def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
@@ -59,23 +59,10 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
         ord_ = ordinal.get(cid, 0)
         cum_flops = 0.0
         cum_out = 0
-        # Busy-time sweep. per_request is start-sorted, so the union of the
-        # intervals seen so far is a set of CLOSED segments (summed into
-        # busy_closed_s) plus one still-open merged segment [seg_start, seg_end].
-        busy_closed_s = 0.0
-        seg_start_s = seg_end_s = None
-        for seq, p in enumerate(result["per_request"], start=1):
-            s, e = p["start_s"], p["end_s"]
-            if seg_start_s is None:
-                busy_s = 0.0
-                seg_start_s, seg_end_s = s, e
-            elif s > seg_end_s:  # idle gap: close the segment, start a new one
-                busy_closed_s += seg_end_s - seg_start_s
-                busy_s = busy_closed_s
-                seg_start_s, seg_end_s = s, e
-            else:  # overlaps the open segment
-                busy_s = busy_closed_s + (s - seg_start_s)
-                seg_end_s = max(seg_end_s, e)
+        # per_request is start-sorted, so busy_offsets applies directly
+        busy = busy_offsets(result["per_request"])
+        for seq, (p, busy_s) in enumerate(zip(result["per_request"], busy),
+                                          start=1):
             cum_flops += p["flops"]
             cum_out += p["out_tokens"]
             per_request.append({

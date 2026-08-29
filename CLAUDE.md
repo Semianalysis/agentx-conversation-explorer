@@ -23,7 +23,9 @@ Independent project — it imitates the InferenceX Explorer tab of
   model mix, cached fraction). When an Explorer selection exists, a selection-scoped
   summary card renders above the dataset cards.
 - **Explorer tab** (added 2026-08-27) — the main working view: one growth curve per
-  conversation (x = main-turn count linear, y = context tokens log). Serving-assumption
+  conversation (y = context tokens log; x measure radio (bld 21): turn count |
+  cumulative time | busy time — time values clamp UP to 1 s — plus the x
+  linear/log scale radio). Serving-assumption
   dropdowns (arch, GPU, Wq/KVq, TP/PP/DP, MFU/MBU) sit in a TOP BAR, ALL defaulting
   "any" (= DEFAULT_ASSUMPTIONS in arch.py); left column holds only dataset + selection.
   The conversation list (identity = ordinal from the dataset's token-sorted index) is

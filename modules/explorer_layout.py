@@ -128,10 +128,27 @@ def layout() -> html.Div:
                                  "Datasets are imported and downloaded on the "
                                  "Overview tab."),
         controls.dropdown("at-explorer-dataset-dd", "pick a cached dataset"),
-        controls.label("Chart x scale (turn count)",
-                       info_text="Scale of the growth chart's x axis (main-"
-                                 "agent turn count). Log compresses very long "
-                                 "conversations so short ones stay readable."),
+        controls.label("Chart x measure",
+                       info_text="X axis of the growth chart. turn count = "
+                                 "main-agent turn ordinal (1..n). cumulative "
+                                 "time = wall-clock seconds since the "
+                                 "conversation's first request — idle "
+                                 "stretches (human think time, nights) show "
+                                 "as flat gaps. busy time = only ACTIVE "
+                                 "seconds, when at least one request (main "
+                                 "or subagent) was in flight — idle gaps "
+                                 "compressed out. Time values below 1 s are "
+                                 "shown at 1."),
+        dcc.RadioItems(
+            id="at-explorer-xmeasure-radio",
+            options=[{"label": " turn count", "value": "turn"},
+                     {"label": " cumulative time", "value": "cumulative_time"},
+                     {"label": " busy time", "value": "busy_time"}],
+            value="turn", style={"fontSize": F_SMALL}),
+        controls.label("Chart x scale",
+                       info_text="Scale of the growth chart's x axis. Log "
+                                 "compresses very long conversations so "
+                                 "short ones stay readable."),
         dcc.RadioItems(
             id="at-explorer-xscale-radio",
             options=[{"label": " linear", "value": "linear"},

@@ -2,7 +2,8 @@
 import unittest
 
 from modules.arch import resolve_assumptions
-from modules.explorer_data import (apply_selection, augment_rows_with_compute,
+from modules.explorer_data import (CURVE_X_MEASURES, apply_selection,
+                                   augment_rows_with_compute, busy_offsets,
                                    build_conversation_table, conversation_curves)
 
 
@@ -110,6 +111,45 @@ class TestCurves(unittest.TestCase):
         pool = [_rec("cA"), _rec("cB")]
         curves = conversation_curves(pool, conv_ids={"cB"})
         self.assertEqual(set(curves), {"cB"})
+
+    def test_time_measures(self):
+        # main [0,10], subagent [5,20] (overlaps), main [30,40] after a gap
+        pool = [
+            _rec("cA", turn_index=0, in_t=100, start=0.0, end=10.0),
+            _rec("cA", role="subagent", turn_index=0, in_t=999,
+                 start=5.0, end=20.0),
+            _rec("cA", turn_index=1, in_t=200, start=30.0, end=40.0),
+        ]
+        xs, ys = conversation_curves(pool, x_measure="cumulative_time")["cA"]
+        self.assertEqual(xs, [1.0, 30.0])   # 0 clamps UP to 1, never dropped
+        self.assertEqual(ys, [100, 200])
+        xs, _ = conversation_curves(pool, x_measure="busy_time")["cA"]
+        # busy at turn 2 start = union [0,20] = 20 s — the 10 s gap dropped,
+        # the overlapping subagent NOT double-counted
+        self.assertEqual(xs, [1.0, 20.0])
+
+    def test_unknown_measure_raises_and_registry_labels(self):
+        with self.assertRaises(KeyError):
+            conversation_curves([_rec("cA")], x_measure="wall_time")
+        self.assertEqual(set(CURVE_X_MEASURES),
+                         {"turn", "cumulative_time", "busy_time"})
+
+
+class TestBusyOffsets(unittest.TestCase):
+    def _iv(self, s, e):
+        return {"start_s": s, "end_s": e}
+
+    def test_overlap_gap_touching(self):
+        recs = [self._iv(0, 10), self._iv(5, 20), self._iv(30, 40),
+                self._iv(40, 45)]
+        self.assertEqual(busy_offsets(recs), [0.0, 5.0, 20.0, 30.0])
+
+    def test_unsorted_raises(self):
+        with self.assertRaises(ValueError):
+            busy_offsets([self._iv(10, 20), self._iv(0, 5)])
+
+    def test_empty(self):
+        self.assertEqual(busy_offsets([]), [])
 
 
 class TestApplySelection(unittest.TestCase):
