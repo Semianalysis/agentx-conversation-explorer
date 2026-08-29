@@ -35,6 +35,10 @@ class TestMeasureRegistry(unittest.TestCase):
         for key, m in ALL_MEASURES.items():
             self.assertIn(m["scale"], ("linear", "log"), key)
 
+    def test_every_measure_has_hover_info(self):
+        for key, m in ALL_MEASURES.items():
+            self.assertTrue(m.get("info", "").strip(), f"{key} missing info")
+
     def test_ordinals_linear_magnitudes_log(self):
         self.assertEqual(X_MEASURES["conv_number"]["scale"], "linear")
         self.assertEqual(X_MEASURES["turn_number"]["scale"], "linear")
@@ -74,6 +78,54 @@ class TestMeasureRegistry(unittest.TestCase):
         rows = [p for p in self.agg["per_request"] if p["cid"] == "cA"]
         self.assertEqual([p["cum_out"] for p in rows], [50, 100])
         self.assertEqual(measure_series(rows, "cumulative_output_tokens"), [50, 100])
+
+
+class TestBusyTime(unittest.TestCase):
+    """busy_s = union of earlier [start, end] intervals at each request start:
+    overlaps merge, idle gaps contribute nothing, resets per conversation."""
+
+    def _agg(self, pool, conv_ids, ordinals):
+        arch_key, _, cfg = resolve_assumptions(None)
+        return aggregate_selection(pool, conv_ids, ARCHITECTURES[arch_key],
+                                   cfg, ordinals)
+
+    def test_overlap_gap_and_touching(self):
+        pool = [
+            _rec("cA", 0, start=0.0, end=10.0),
+            _rec("cA", 1, start=5.0, end=20.0),   # overlaps r0
+            _rec("cA", 2, start=30.0, end=40.0),  # after a 10 s idle gap
+            _rec("cA", 3, start=40.0, end=45.0),  # touches r2's end exactly
+        ]
+        agg = self._agg(pool, ["cA"], {"cA": 1})
+        busy = [p["busy_s"] for p in agg["per_request"]]
+        # r1 starts 5 s in; r2 after the merged [0,20] segment = 20 busy s;
+        # r3 at r2's end: 20 + (40-30) = 30 — the idle gap never counts.
+        self.assertEqual(busy, [0.0, 5.0, 20.0, 30.0])
+
+    def test_busy_never_exceeds_wall_clock(self):
+        pool = [_rec("cA", i, start=float(i * 100), end=float(i * 100 + 5))
+                for i in range(5)]
+        agg = self._agg(pool, ["cA"], {"cA": 1})
+        for p in agg["per_request"]:
+            self.assertLessEqual(p["busy_s"], p["start_s"])
+
+    def test_resets_per_conversation(self):
+        pool = [_rec("cA", 0, start=0.0, end=100.0),
+                _rec("cA", 1, start=200.0, end=210.0),
+                _rec("cB", 0, start=0.0, end=10.0)]
+        agg = self._agg(pool, ["cA", "cB"], {"cA": 1, "cB": 2})
+        first_b = [p for p in agg["per_request"] if p["cid"] == "cB"][0]
+        self.assertEqual(first_b["busy_s"], 0.0)
+
+    def test_busy_time_measure_registered_and_clamped(self):
+        self.assertIn("busy_time", X_MEASURES)
+        self.assertEqual(X_MEASURES["busy_time"]["scale"], "log")
+        pool = [_rec("cA", 0, start=0.0, end=10.0),
+                _rec("cA", 1, start=10.5, end=12.0)]
+        agg = self._agg(pool, ["cA"], {"cA": 1})
+        vals = measure_series(agg["per_request"], "busy_time")
+        self.assertEqual(vals[0], 1.0)   # busy 0 clamps up to the axis floor
+        self.assertEqual(vals[1], 10.0)
 
 
 class TestSharedAxisRange(unittest.TestCase):

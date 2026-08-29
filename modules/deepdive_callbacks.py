@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from dash import Input, Output, html
 from dash.exceptions import PreventUpdate
 
-from modules import api_client, records, theme
+from modules import api_client, controls, records, theme
 from modules.arch import ARCHITECTURES, GPUS, implied_gpu_seconds, resolve_assumptions
 from modules.deepdive_data import aggregate_selection, grouped_series
 from modules.explorer_data import build_conversation_table
@@ -178,18 +178,28 @@ def _finish_measure_figure(fig: go.Figure, title: str, xm: dict, ym: dict) -> go
     return fig
 
 
-def _card(title: str, rows: list[tuple[str, str]]) -> html.Div:
+def _card(title: str, rows: list[tuple], info_text: str | None = None) -> html.Div:
+    """Summary card. rows are (key, value) or (key, value, hover-help)."""
+    title_children: list = [title]
+    if info_text:
+        title_children.append(controls.info(info_text))
+    row_divs = []
+    for row in rows:
+        k, v = row[0], row[1]
+        tip = row[2] if len(row) > 2 else None
+        row_divs.append(html.Div(
+            style={"display": "flex", "justifyContent": "space-between",
+                   "fontSize": "12px", "gap": "10px"},
+            children=[html.Span([k, controls.info(tip)] if tip else k,
+                                style={"color": "#666"}),
+                      html.Span(v, style={"fontFamily": MONO})]))
     return html.Div(
         style={"border": "1px solid #ddd", "borderRadius": "6px", "padding": "10px",
                "marginBottom": "10px", "background": "white"},
-        children=[html.Div(title, style={"fontWeight": "600", "fontSize": F_SMALL,
-                                         "marginBottom": "6px"})] + [
-            html.Div(style={"display": "flex", "justifyContent": "space-between",
-                            "fontSize": "12px", "gap": "10px"},
-                     children=[html.Span(k, style={"color": "#666"}),
-                               html.Span(v, style={"fontFamily": MONO})])
-            for k, v in rows
-        ],
+        children=[html.Div(title_children,
+                           style={"fontWeight": "600", "fontSize": F_SMALL,
+                                  "marginBottom": "6px", "display": "flex",
+                                  "alignItems": "center"})] + row_divs,
     )
 
 
@@ -202,39 +212,72 @@ def _summary_panel(arch, gpu, cfg, agg, gpu_time, all_selected: bool) -> list:
     return [
         _card(scope, [
             ("Requests", f"{totals['n_requests']:,}"),
-            ("… subagent", f"{n_sub:,}"),
-            ("Wall-clock (sum)", f"{wall_s / 3600:.2f} h"),
+            ("… subagent", f"{n_sub:,}",
+             "Requests made by nested agents spawned via tool calls."),
+            ("Wall-clock (sum)", f"{wall_s / 3600:.2f} h",
+             "Sum of each conversation's span (first request start to last "
+             "request end) — includes idle time, and conversations overlap "
+             "in real time, so this is workload volume, not elapsed time."),
             ("Input tokens", fmt_count(totals["in_tokens"])),
-            ("… cached", fmt_count(totals["cached_tokens"])),
-            ("… uncached", fmt_count(totals["uncached_tokens"])),
+            ("… cached", fmt_count(totals["cached_tokens"]),
+             "Input tokens served from the prompt cache — no prefill compute."),
+            ("… uncached", fmt_count(totals["uncached_tokens"]),
+             "New input tokens actually prefilled."),
             ("Output tokens", fmt_count(totals["out_tokens"])),
-        ]),
+        ], info_text="Token counts come straight from the traces; everything "
+                     "below is IMPLIED from them under the assumption bar's "
+                     "settings on the Explorer tab."),
         _card(f"Implied compute — {arch['label']}", [
-            ("Prefill FLOPs", fmt_flops(totals["prefill_flops"])),
-            ("Decode FLOPs", fmt_flops(totals["decode_flops"])),
+            ("Prefill FLOPs", fmt_flops(totals["prefill_flops"]),
+             "Processing new input: linear layers over uncached tokens plus "
+             "attention against each request's context."),
+            ("Decode FLOPs", fmt_flops(totals["decode_flops"]),
+             "Generating output tokens, one forward pass per token."),
             ("Total FLOPs", fmt_flops(totals["prefill_flops"] + totals["decode_flops"])),
-        ]),
+        ], info_text="FLOPs this architecture WOULD spend serving these "
+                     "traces — computed from the token counts, not measured "
+                     "on real hardware."),
         _card(f"Implied memory movement (HBM, kv {cfg['dtype_kv']})", [
             ("Prefill", fmt_bytes(totals["prefill_hbm_bytes"])),
-            ("Decode", fmt_bytes(totals["decode_hbm_bytes"])),
+            ("Decode", fmt_bytes(totals["decode_hbm_bytes"]),
+             "Decode re-reads the weights and the growing KV cache for every "
+             "generated token — usually the bandwidth-bound phase."),
             ("Total", fmt_bytes(totals["prefill_hbm_bytes"] + totals["decode_hbm_bytes"])),
-            ("Peak KV footprint (one conv)", fmt_bytes(totals["peak_kv_bytes"])),
-        ]),
+            ("Peak KV footprint (one conv)", fmt_bytes(totals["peak_kv_bytes"]),
+             "Largest single-request context KV under these assumptions — "
+             "what one replica must hold in HBM at that moment."),
+        ], info_text="Bytes moved through GPU memory (HBM): weight reads and "
+                     "KV-cache reads/writes implied by the token counts."),
         _card(f"Implied network (TP={cfg['tp']}, PP={cfg.get('pp', 1)}, "
               f"DP={cfg.get('dp', 1)})", [
-            ("TP all-reduce", fmt_bytes(totals["net_tp_bytes"])),
-            ("EP all-to-all", fmt_bytes(totals["net_ep_bytes"])),
-            ("PP stage traffic", fmt_bytes(totals["net_pp_bytes"])),
-        ]),
+            ("TP all-reduce", fmt_bytes(totals["net_tp_bytes"]),
+             "Tensor parallelism synchronizes every layer's partial results "
+             "across the TP group — twice per layer per token."),
+            ("EP all-to-all", fmt_bytes(totals["net_ep_bytes"]),
+             "MoE expert dispatch and combine traffic (zero for dense "
+             "architectures)."),
+            ("PP stage traffic", fmt_bytes(totals["net_pp_bytes"]),
+             "Activations crossing each pipeline-stage boundary (zero when "
+             "PP=1)."),
+        ], info_text="Interconnect traffic implied by the parallelism "
+                     "assumptions from the Explorer assumption bar."),
         _card(f"Single-GPU-equivalent time — {gpu['label']} "
               f"({cfg['dtype_weights']}, MFU {cfg['mfu'] * 100:.0f}%, "
               f"MBU {cfg['mbu'] * 100:.0f}%)", [
             ("Prefill", fmt_seconds(gpu_time["prefill_s"])),
-            ("… bound by", gpu_time["prefill_bound"]),
+            ("… bound by", gpu_time["prefill_bound"],
+             "Whichever takes longer decides: compute (FLOPs ÷ peak×MFU) or "
+             "memory (bytes ÷ bandwidth×MBU)."),
             ("Decode", fmt_seconds(gpu_time["decode_s"])),
-            ("… bound by", gpu_time["decode_bound"]),
+            ("… bound by", gpu_time["decode_bound"],
+             "Whichever takes longer decides: compute (FLOPs ÷ peak×MFU) or "
+             "memory (bytes ÷ bandwidth×MBU)."),
             ("Total", fmt_seconds(gpu_time["total_s"])),
             ("Sustained GPUs (vs summed wall)",
-             f"{gpu_time['total_s'] / wall_s:.3g}" if wall_s > 0 else "n/a"),
-        ]),
+             f"{gpu_time['total_s'] / wall_s:.3g}" if wall_s > 0 else "n/a",
+             "GPU-seconds ÷ summed wall-clock: the average number of GPUs "
+             "this workload keeps busy end-to-end, idle time included."),
+        ], info_text="How long ONE such GPU would need for all the implied "
+                     "work, at the assumed utilization — the basis for the "
+                     "sustained-GPU counts in the conversation list."),
     ]

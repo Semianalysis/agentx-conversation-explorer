@@ -24,7 +24,9 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
     measure registry: 'ord' (conversation ordinal), 'cid', 'seq' (1-based
     request sequence within the conversation, time order), 'cum_flops'
     (running FLOPs within the conversation), 'kv_bytes' (context KV-cache
-    bytes under the assumptions).
+    bytes under the assumptions), 'busy_s' (ACTIVE seconds elapsed at the
+    request's start: the measure of the union of all earlier [start, end]
+    request intervals in the conversation — idle gaps contribute nothing).
 
     Raises on empty conv_ids or a conv_id missing from the pool — an
     aggregate over nothing, or over a phantom conversation, is a caller bug.
@@ -57,7 +59,23 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
         ord_ = ordinal.get(cid, 0)
         cum_flops = 0.0
         cum_out = 0
+        # Busy-time sweep. per_request is start-sorted, so the union of the
+        # intervals seen so far is a set of CLOSED segments (summed into
+        # busy_closed_s) plus one still-open merged segment [seg_start, seg_end].
+        busy_closed_s = 0.0
+        seg_start_s = seg_end_s = None
         for seq, p in enumerate(result["per_request"], start=1):
+            s, e = p["start_s"], p["end_s"]
+            if seg_start_s is None:
+                busy_s = 0.0
+                seg_start_s, seg_end_s = s, e
+            elif s > seg_end_s:  # idle gap: close the segment, start a new one
+                busy_closed_s += seg_end_s - seg_start_s
+                busy_s = busy_closed_s
+                seg_start_s, seg_end_s = s, e
+            else:  # overlaps the open segment
+                busy_s = busy_closed_s + (s - seg_start_s)
+                seg_end_s = max(seg_end_s, e)
             cum_flops += p["flops"]
             cum_out += p["out_tokens"]
             per_request.append({
@@ -65,6 +83,7 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
                 "cum_flops": cum_flops,
                 "cum_out": cum_out,
                 "kv_bytes": p["in_tokens"] * kv_bytes_per_token,
+                "busy_s": busy_s,
             })
     return {"totals": totals, "per_request": per_request,
             "wall_s_sum": wall_s_sum, "n_convs": len(conv_ids)}
@@ -79,9 +98,10 @@ def grouped_series(per_request: list[dict], x_key: str, y_key: str,
     or defaulted). min/max are the extreme per-conversation values at each x.
 
     x='turn_number': exact turn positions (each conversation has at most one
-    request per seq). x='cumulative_time': geometric time bins over [1s, max];
-    a conversation's value in a bin is its mean there, and the cross-
-    conversation stats are over those per-conversation means.
+    request per seq). Log-scaled time measures (cumulative_time, busy_time):
+    geometric time bins over [1s, max]; a conversation's value in a bin is its
+    mean there, and the cross-conversation stats are over those
+    per-conversation means.
     x='conv_number' cannot be grouped (each x IS one conversation) -> ValueError.
 
     Returns {'xs', 'mean', 'lo', 'hi', 'n_alive'} (aligned lists, xs ascending).
@@ -101,7 +121,7 @@ def grouped_series(per_request: list[dict], x_key: str, y_key: str,
     if x_key == "turn_number":
         for p in per_request:
             acc.setdefault(xg(p), {}).setdefault(p["cid"], []).append(yg(p))
-    else:  # cumulative_time -> geometric bins
+    else:  # log-scaled time measure -> geometric bins
         xs_all = [xg(p) for p in per_request]
         lo_x, hi_x = 1.0, max(max(xs_all), 1.0)
         if hi_x == lo_x:
