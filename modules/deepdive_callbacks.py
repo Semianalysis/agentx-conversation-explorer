@@ -16,7 +16,8 @@ from modules.arch import ARCHITECTURES, GPUS, implied_gpu_seconds, resolve_assum
 from modules.deepdive_data import aggregate_selection, grouped_series
 from modules.explorer_data import build_conversation_table
 from modules.figures import empty_figure
-from modules.measures import ALL_MEASURES, X_MEASURES, Y_MEASURES
+from modules.measures import (ALL_MEASURES, X_MEASURES, Y_MEASURES,
+                              measure_series, shared_axis_range)
 from modules.theme import (F_SMALL, MONO, ROLE_COLORS, color_for, fmt_bytes,
                            fmt_count, fmt_flops, fmt_seconds)
 
@@ -86,6 +87,14 @@ def register_deepdive_callbacks(app) -> None:
                                 envelope=axes.get("envelope", False))
                 for y_name in ("y1", "y2", "y3")
             ]
+            # One locked x window for all three charts (grouped-mode bin mids
+            # sit at most half a bin inside the data extremes — the 2% pad
+            # covers that, so the same range fits every chart mode).
+            x_range = shared_axis_range(
+                measure_series(agg["per_request"], axes["x"]),
+                X_MEASURES[axes["x"]]["scale"])
+            for fig in figs:
+                fig.update_xaxes(range=x_range, autorange=False)
             return (*figs, _summary_panel(arch, gpu, cfg, agg, gpu_time,
                                           all_selected))
         except PreventUpdate:

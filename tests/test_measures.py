@@ -4,7 +4,7 @@ import unittest
 from modules.arch import ARCHITECTURES, DTYPE_BYTES, resolve_assumptions
 from modules.deepdive_data import aggregate_selection
 from modules.measures import (ALL_MEASURES, DEFAULT_AXES, X_MEASURES,
-                              Y_MEASURES, measure_series)
+                              Y_MEASURES, measure_series, shared_axis_range)
 
 
 def _rec(conv_id, turn_index=0, in_t=1000, unc=100, out=50, start=0.0, end=10.0):
@@ -74,6 +74,41 @@ class TestMeasureRegistry(unittest.TestCase):
         rows = [p for p in self.agg["per_request"] if p["cid"] == "cA"]
         self.assertEqual([p["cum_out"] for p in rows], [50, 100])
         self.assertEqual(measure_series(rows, "cumulative_output_tokens"), [50, 100])
+
+
+class TestSharedAxisRange(unittest.TestCase):
+    def test_log_range_is_log10_and_covers_values(self):
+        rng = shared_axis_range([1.0, 1000.0], "log")
+        self.assertLess(rng[0], 0.0)          # log10(1) minus pad
+        self.assertGreater(rng[1], 3.0)       # log10(1000) plus pad
+        # pad is 2% of the 3-decade span per side
+        self.assertAlmostEqual(rng[0], -0.06)
+        self.assertAlmostEqual(rng[1], 3.06)
+
+    def test_log_single_value_gets_minimum_pad(self):
+        rng = shared_axis_range([100.0], "log")
+        self.assertAlmostEqual(rng[0], 2.0 - 0.05)
+        self.assertAlmostEqual(rng[1], 2.0 + 0.05)
+
+    def test_linear_range_covers_ordinals(self):
+        rng = shared_axis_range([1, 2, 3], "linear")
+        self.assertLessEqual(rng[0], 1 - 0.5 + 1e-9)
+        self.assertGreaterEqual(rng[1], 3 + 0.5 - 1e-9)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            shared_axis_range([], "log")
+
+    def test_nonpositive_log_raises(self):
+        with self.assertRaises(ValueError):
+            shared_axis_range([0.0, 10.0], "log")
+
+    def test_same_range_for_every_measure_over_one_pool(self):
+        # The lock property: the range depends only on the x series, so any
+        # chart built over the same per-request rows gets the identical window.
+        xs = [1.0, 55.0, 778137.0]
+        self.assertEqual(shared_axis_range(xs, "log"),
+                         shared_axis_range(list(reversed(xs)), "log"))
 
 
 class TestGroupedSeries(unittest.TestCase):

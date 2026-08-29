@@ -13,6 +13,8 @@ Pure module: no Dash imports.
 """
 from __future__ import annotations
 
+import math
+
 
 def _clamp1(v: float) -> float:
     return v if v > 1.0 else 1.0
@@ -67,3 +69,23 @@ def measure_series(per_request: list[dict], key: str) -> list[float]:
     unknown measure key (typo detection)."""
     getter = ALL_MEASURES[key]["getter"]
     return [getter(p) for p in per_request]
+
+
+def shared_axis_range(values: list[float], scale: str) -> list[float]:
+    """Explicit plotly axis range covering `values`, padded ~2% per side so
+    extreme points stay visible. Locks the three deep-dive charts to one
+    identical x window (independent autorange pads marker and line traces
+    differently, misaligning them). Log scale -> the pair is in log10 units
+    (plotly's convention); raises on empty values or non-positive log input.
+    """
+    if not values:
+        raise ValueError("shared_axis_range over no values")
+    lo, hi = min(values), max(values)
+    if scale == "log":
+        if lo <= 0:
+            raise ValueError(f"log-axis range needs positive values, got min={lo}")
+        log_lo, log_hi = math.log10(lo), math.log10(hi)
+        pad = max((log_hi - log_lo) * 0.02, 0.05)
+        return [log_lo - pad, log_hi + pad]
+    pad = max((hi - lo) * 0.02, 0.5)
+    return [lo - pad, hi + pad]
