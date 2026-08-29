@@ -186,6 +186,24 @@ def layout() -> html.Div:
             html.Div("Grouped mode: at each x, conversations that have ended "
                      "drop out of mean/min/max — never padded with a default.",
                      style={"fontSize": "10px", "color": "#aaa", "marginTop": "2px"}),
+            html.Div(["Magnifier: click a point to zoom that chart 5× around "
+                      "it (the other charts gray points outside the window); "
+                      "click a point on the magnified chart to inspect it in "
+                      "the right column; double-click to reset.",
+                      controls.info(
+                          "The 5× window is centered on the clicked point and "
+                          "clamped inside the full range. On the other two "
+                          "charts a request stays colored only if its x AND "
+                          "its value on the magnified chart's measure fall "
+                          "inside the window. The point inspector shows the "
+                          "request's sizes (context/ISL/OSL), timing, implied "
+                          "compute, and the serving assumptions it was priced "
+                          "under. In grouped or per-conversation-line modes "
+                          "only the magnified chart's ranges apply (no "
+                          "per-point graying), and line points can be "
+                          "magnified but not inspected.")],
+                     style={"fontSize": "10px", "color": "#aaa", "marginTop": "4px",
+                            "display": "flex", "alignItems": "center"}),
         ],
     )
 
@@ -196,6 +214,10 @@ def layout() -> html.Div:
         children=[
             dcc.Store(id="at-deep-axes-store"),
             dcc.Store(id="at-deep-sort-store"),
+            # {'chart': 'y1'|'y2'|'y3', 'cx': x, 'cy': y} | None (magnifier)
+            dcc.Store(id="at-deep-zoom-store"),
+            # {'uid': request uid} | None (point inspector)
+            dcc.Store(id="at-deep-point-store"),
         ] + [
             # each chart takes exactly a third of the window height and the
             # responsive figures follow their container on window resize

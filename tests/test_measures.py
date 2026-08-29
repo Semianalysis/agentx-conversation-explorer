@@ -4,7 +4,8 @@ import unittest
 from modules.arch import ARCHITECTURES, DTYPE_BYTES, resolve_assumptions
 from modules.deepdive_data import aggregate_selection
 from modules.measures import (ALL_MEASURES, DEFAULT_AXES, X_MEASURES,
-                              Y_MEASURES, measure_series, shared_axis_range)
+                              Y_MEASURES, axis_units, measure_series,
+                              shared_axis_range, zoom_window)
 
 
 def _rec(conv_id, turn_index=0, in_t=1000, unc=100, out=50, start=0.0, end=10.0):
@@ -161,6 +162,41 @@ class TestSharedAxisRange(unittest.TestCase):
         xs = [1.0, 55.0, 778137.0]
         self.assertEqual(shared_axis_range(xs, "log"),
                          shared_axis_range(list(reversed(xs)), "log"))
+
+
+class TestZoomHelpers(unittest.TestCase):
+    def test_window_is_fifth_of_range_centered(self):
+        self.assertEqual(zoom_window(5.0, [0.0, 10.0], 5.0), [4.0, 6.0])
+
+    def test_window_clamps_inside_full_range(self):
+        self.assertEqual(zoom_window(0.1, [0.0, 10.0], 5.0), [0.0, 2.0])
+        self.assertEqual(zoom_window(9.9, [0.0, 10.0], 5.0), [8.0, 10.0])
+
+    def test_factor_leq_one_returns_full(self):
+        self.assertEqual(zoom_window(5.0, [0.0, 10.0], 1.0), [0.0, 10.0])
+
+    def test_degenerate_range_raises(self):
+        with self.assertRaises(ValueError):
+            zoom_window(1.0, [3.0, 3.0], 5.0)
+
+    def test_axis_units(self):
+        self.assertEqual(axis_units(100.0, "log"), 2.0)
+        self.assertEqual(axis_units(7.0, "linear"), 7.0)
+        with self.assertRaises(ValueError):
+            axis_units(0.0, "log")
+
+    def test_zoom_member_uids(self):
+        from modules.deepdive_data import zoom_member_uids
+        rows = [
+            {"uid": "a", "seq": 5, "in_tokens": 100},    # inside both
+            {"uid": "b", "seq": 50, "in_tokens": 100},   # x outside
+            {"uid": "c", "seq": 5, "in_tokens": 10_000}, # y outside
+        ]
+        members = zoom_member_uids(rows, "turn_number", "context_tokens",
+                                   window_x=[0.0, 10.0],        # linear x
+                                   window_y=[1.0, 3.0],         # log10 y
+                                   x_scale="linear")
+        self.assertEqual(members, {"a"})
 
 
 class TestGroupedSeries(unittest.TestCase):

@@ -8,22 +8,26 @@ from __future__ import annotations
 import logging
 
 import plotly.graph_objects as go
-from dash import Input, Output, html
+from dash import Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
 from modules import api_client, controls, records, theme
-from modules.arch import ARCHITECTURES, GPUS, implied_gpu_seconds, resolve_assumptions
-from modules.deepdive_data import aggregate_selection, grouped_series
+from modules.arch import ARCHITECTURES, request_compute, resolve_assumptions
+from modules.deepdive_data import (aggregate_selection, grouped_series,
+                                   zoom_member_uids)
 from modules.explorer_data import build_conversation_table
 from modules.figures import empty_figure
-from modules.measures import (ALL_MEASURES, X_MEASURES, Y_MEASURES,
-                              measure_series, shared_axis_range)
+from modules.measures import (ALL_MEASURES, X_MEASURES, Y_MEASURES, axis_units,
+                              measure_series, shared_axis_range, zoom_window)
 from modules.theme import (F_SMALL, MONO, ROLE_COLORS, color_for, fmt_bytes,
-                           fmt_count, fmt_flops, fmt_seconds)
+                           fmt_count, fmt_flops)
 
 logger = logging.getLogger(__name__)
 
 _MAX_PER_CONV_LINES = 12  # above this, cumulative measures fall back to markers
+_SLOTS = ("y1", "y2", "y3")
+_ZOOM_FACTOR = 5.0
+_GRAY = "rgba(160,160,160,0.25)"
 
 
 def register_deepdive_callbacks(app) -> None:
@@ -44,6 +48,64 @@ def register_deepdive_callbacks(app) -> None:
                 "xscale": xscale or "auto"}
 
     @app.callback(
+        Output("at-deep-zoom-store", "data"),
+        Output("at-deep-point-store", "data"),
+        [Output(f"at-deep-{s}-graph", "clickData") for s in _SLOTS],
+        [Input(f"at-deep-{s}-graph", "clickData") for s in _SLOTS],
+        [Input(f"at-deep-{s}-graph", "relayoutData") for s in _SLOTS],
+        Input("at-deep-axes-store", "data"),
+        Input("at-explorer-filter-store", "data"),
+        Input("at-explorer-selection-store", "data"),
+        Input("at-explorer-config-store", "data"),
+        State("at-deep-zoom-store", "data"),
+        prevent_initial_call=True,
+    )
+    def zoom_and_point(*args):
+        """Magnifier state: a click on an unmagnified chart zooms it 5×
+        around the point; a click on a point of the MAGNIFIED chart opens
+        the point inspector; a plotly double-click (relayout autorange
+        event) cancels both. Any re-bin trigger resets (clickData self-loop
+        resets let the same point be clicked again)."""
+        reset = [None] * len(_SLOTS)
+        try:
+            zoom = args[-1]
+            ctx = callback_context
+            trig = ctx.triggered_id
+            tval = ctx.triggered[0]["value"] if ctx.triggered else None
+
+            if trig in ("at-deep-axes-store", "at-explorer-filter-store",
+                        "at-explorer-selection-store",
+                        "at-explorer-config-store"):
+                return None, None, *reset
+            if not (isinstance(trig, str) and trig.startswith("at-deep-")):
+                raise PreventUpdate
+            slot = trig.removeprefix("at-deep-").removesuffix("-graph")
+            prop = ctx.triggered[0]["prop_id"].rsplit(".", 1)[1]
+            if prop == "relayoutData":
+                if tval and ("xaxis.autorange" in tval
+                             or "yaxis.autorange" in tval):
+                    return None, None, *reset  # double-click = cancel
+                raise PreventUpdate
+            if not tval:  # clickData reset echo
+                raise PreventUpdate
+            pts = tval.get("points") or []
+            if not pts:
+                raise PreventUpdate
+            pt = pts[0]
+            if zoom and zoom.get("chart") == slot:
+                uid = pt.get("customdata")
+                if not uid:  # grouped/envelope lines carry no request uid
+                    raise PreventUpdate
+                return no_update, {"uid": uid}, *reset
+            return ({"chart": slot, "cx": pt["x"], "cy": pt["y"]},
+                    None, *reset)
+        except PreventUpdate:
+            raise
+        except Exception:
+            logger.exception("deep-dive zoom/point failed")
+            raise PreventUpdate
+
+    @app.callback(
         Output("at-deep-y1-graph", "figure"),
         Output("at-deep-y2-graph", "figure"),
         Output("at-deep-y3-graph", "figure"),
@@ -52,9 +114,11 @@ def register_deepdive_callbacks(app) -> None:
         Input("at-explorer-config-store", "data"),
         Input("at-explorer-filter-store", "data"),
         Input("at-deep-axes-store", "data"),
+        Input("at-deep-zoom-store", "data"),
+        Input("at-deep-point-store", "data"),
         prevent_initial_call=True,
     )
-    def render(selection, config, filters, axes):
+    def render(selection, config, filters, axes, zoom, point):
         try:
             slug = (filters or {}).get("slug")
             if not slug:
@@ -66,9 +130,8 @@ def register_deepdive_callbacks(app) -> None:
             for name in ("x", "y1", "y2", "y3"):
                 if axes.get(name) not in ALL_MEASURES:
                     raise PreventUpdate  # radios not initialized yet
-            arch_key, gpu_key, cfg = resolve_assumptions(config)
+            arch_key, _gpu_key, cfg = resolve_assumptions(config)
             arch = ARCHITECTURES[arch_key]
-            gpu = GPUS[gpu_key]
 
             pool = records.load_records(slug)
             index_ids = [it["conv_id"] for it in api_client.fetch_conversation_index(slug)]
@@ -80,28 +143,60 @@ def register_deepdive_callbacks(app) -> None:
             conv_ids = sel_ids or list(ordinal)
 
             agg = aggregate_selection(pool, conv_ids, arch, cfg, ordinal)
-            gpu_time = implied_gpu_seconds(agg["totals"], gpu, cfg)
 
             xscale = axes.get("xscale", "auto")
             x_scale_eff = (X_MEASURES[axes["x"]]["scale"] if xscale == "auto"
                            else xscale)
-            figs = [
-                _measure_figure(agg["per_request"], axes["x"], axes[y_name],
-                                agg["n_convs"],
-                                grouped=axes.get("grouped", False),
-                                envelope=axes.get("envelope", False),
-                                x_scale=x_scale_eff)
-                for y_name in ("y1", "y2", "y3")
-            ]
             # One locked x window for all three charts (grouped-mode bin mids
             # sit at most half a bin inside the data extremes — the 2% pad
             # covers that, so the same range fits every chart mode).
             x_range = shared_axis_range(
                 measure_series(agg["per_request"], axes["x"]), x_scale_eff)
-            for fig in figs:
-                fig.update_xaxes(range=x_range, autorange=False)
-            return (*figs, _summary_panel(arch, gpu, cfg, agg, gpu_time,
-                                          all_selected))
+
+            # magnifier: window on the zoomed chart, member set for graying
+            zoom = zoom if zoom and zoom.get("chart") in _SLOTS else None
+            window_x = window_y = None
+            member_uids: set | None = None
+            if zoom:
+                z_y_key = axes[zoom["chart"]]
+                y_range = shared_axis_range(
+                    measure_series(agg["per_request"], z_y_key), "log")
+                window_x = zoom_window(axis_units(max(zoom["cx"], 1e-12),
+                                                  x_scale_eff),
+                                       x_range, _ZOOM_FACTOR)
+                window_y = zoom_window(axis_units(max(zoom["cy"], 1e-12),
+                                                  "log"),
+                                       y_range, _ZOOM_FACTOR)
+                member_uids = zoom_member_uids(
+                    agg["per_request"], axes["x"], z_y_key,
+                    window_x, window_y, x_scale_eff)
+
+            figs = []
+            for slot in _SLOTS:
+                is_zoomed = bool(zoom) and zoom["chart"] == slot
+                fig = _measure_figure(
+                    agg["per_request"], axes["x"], axes[slot],
+                    agg["n_convs"],
+                    grouped=axes.get("grouped", False),
+                    envelope=axes.get("envelope", False),
+                    x_scale=x_scale_eff,
+                    member_uids=(None if (is_zoomed or member_uids is None)
+                                 else member_uids),
+                    magnified=is_zoomed)
+                if is_zoomed:
+                    fig.update_xaxes(range=window_x, autorange=False)
+                    fig.update_yaxes(range=window_y, autorange=False)
+                else:
+                    fig.update_xaxes(range=x_range, autorange=False)
+                figs.append(fig)
+
+            panel = _summary_panel(arch, cfg, agg, all_selected)
+            if zoom and (point or {}).get("uid"):
+                p = next((r for r in agg["per_request"]
+                          if r["uid"] == point["uid"]), None)
+                if p is not None:
+                    panel = _point_inspector(p, arch, cfg) + panel
+            return (*figs, panel)
         except PreventUpdate:
             raise
         except Exception:
@@ -111,16 +206,21 @@ def register_deepdive_callbacks(app) -> None:
 
 def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
                     grouped: bool = False, envelope: bool = False,
-                    x_scale: str | None = None) -> go.Figure:
+                    x_scale: str | None = None,
+                    member_uids: set | None = None,
+                    magnified: bool = False) -> go.Figure:
     """x_scale overrides the x measure's natural axis scale ('linear'/'log');
-    None keeps the registry's scale."""
+    None keeps the registry's scale. member_uids = the magnifier window's
+    member set: on a NON-magnified chart, requests outside it draw gray
+    (marker mode only — line modes aren't grayed per point). magnified marks
+    the title."""
     xm, ym = dict(X_MEASURES[x_key]), Y_MEASURES[y_key]
     if x_scale:
         if x_scale not in ("linear", "log"):
             raise ValueError(f"unknown x_scale override {x_scale!r}")
         xm["scale"] = x_scale
     fig = go.Figure()
-    title = ym["label"]
+    title = ym["label"] + (" — magnified 5×" if magnified else "")
     if grouped and x_key != "conv_number" and n_convs > 1:
         g = grouped_series(per_req, x_key, y_key)
         if envelope:
@@ -156,26 +256,40 @@ def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
                 y=[ym["getter"](p) for p in rows],
                 mode="lines", line=dict(color=color_for(cid), width=2),
                 name=f"#{rows[0]['ord']}",
+                customdata=[p["uid"] for p in rows],
                 hovertemplate=(f"conv #{rows[0]['ord']} — "
                                "x=%{x:,.6g}  y=%{y:,.6g}<extra></extra>"),
             ))
     else:
-        for role, color in ROLE_COLORS.items():
-            rows = [p for p in per_req if p["role"] == role]
-            if not rows:
-                continue
+        def _marker_trace(rows, color, name, opacity):
             fig.add_trace(go.Scattergl(
                 x=[xm["getter"](p) for p in rows],
                 y=[ym["getter"](p) for p in rows],
                 mode="markers",
-                marker=dict(color=color, size=4, opacity=0.5),
-                name=role,
+                marker=dict(color=color, size=4, opacity=opacity),
+                name=name,
+                customdata=[p["uid"] for p in rows],
                 hovertext=[(f"conv #{p['ord']} — {p['model']} ({p['role']})<br>"
                             f"turn {p['seq']}  t={p['start_s']:.0f}s<br>"
                             f"x={xm['getter'](p):,.6g}  y={ym['getter'](p):,.6g}")
                            for p in rows],
                 hoverinfo="text",
             ))
+
+        for role, color in ROLE_COLORS.items():
+            rows = [p for p in per_req if p["role"] == role]
+            if not rows:
+                continue
+            if member_uids is None:
+                _marker_trace(rows, color, role, 0.5)
+                continue
+            inside = [p for p in rows if p["uid"] in member_uids]
+            outside = [p for p in rows if p["uid"] not in member_uids]
+            if outside:
+                _marker_trace(outside, _GRAY, f"{role} (outside magnifier)",
+                              0.35)
+            if inside:
+                _marker_trace(inside, color, role, 0.6)
     return _finish_measure_figure(fig, title, xm, ym)
 
 
@@ -215,7 +329,68 @@ def _card(title: str, rows: list[tuple], info_text: str | None = None) -> html.D
     )
 
 
-def _summary_panel(arch, gpu, cfg, agg, gpu_time, all_selected: bool) -> list:
+def _point_inspector(p: dict, arch: dict, cfg: dict) -> list:
+    """Right-column cards for one clicked request: its sizes and timing, the
+    implied per-phase work, and the serving assumptions it is priced under."""
+    c = request_compute(arch, p["cached_tokens"], p["uncached_tokens"],
+                        p["out_tokens"], cfg)
+    dur_s = p["end_s"] - p["start_s"]
+    moe = arch["n_experts"] > 0
+    return [
+        _card(f"Point — conv #{p['ord']}, turn {p['seq']} ({p['role']})", [
+            ("Model", p["model"]),
+            ("Start / duration", f"{p['start_s']:,.0f}s / {dur_s:,.1f}s",
+             "Conversation-relative start, and the request's own wall-clock."),
+            ("Busy at start", f"{p['busy_s']:,.0f}s",
+             "Active seconds elapsed in this conversation when the request "
+             "began (idle gaps excluded)."),
+            ("Context (total ISL)", fmt_count(p["in_tokens"]),
+             "Total input sequence length — every token the request attends "
+             "over."),
+            ("… cached context", fmt_count(p["cached_tokens"]),
+             "Served from the prompt cache — no prefill compute."),
+            ("… new input (midfill)", fmt_count(p["uncached_tokens"]),
+             "Uncached tokens actually prefilled on top of the cached "
+             "context."),
+            ("OSL (decode)", fmt_count(p["out_tokens"]),
+             "Output sequence length — tokens generated."),
+            ("KV cache", f"{fmt_bytes(p['kv_bytes'])} "
+                         f"({fmt_count(p['in_tokens'])} tok)",
+             "Context KV footprint under the KV precision assumption."),
+            ("Prefill FLOPs", fmt_flops(c["prefill_flops"])),
+            ("Decode FLOPs", fmt_flops(c["decode_flops"])),
+            ("Turn FLOPs", fmt_flops(p["flops"])),
+        ], info_text="One request, as clicked on the magnified chart. Sizes "
+                     "and timing come from the trace; FLOPs/KV are implied "
+                     "under the assumptions below. Double-click a chart to "
+                     "close the magnifier and this inspector."),
+        _card("Serving assumptions at this point", [
+            ("Architecture", arch["label"]),
+            ("TP / PP / DP",
+             f"{cfg['tp']} / {cfg.get('pp', 1)} / {cfg.get('dp', 1)}",
+             "Tensor / pipeline / data parallelism from the Explorer "
+             "assumption bar."),
+            ("EP",
+             (f"all-to-all over {arch['n_experts']} experts, "
+              f"top-{arch['topk']} (no EP degree modeled)") if moe
+             else "dense architecture — none",
+             "Expert-parallel traffic is modeled as full dispatch+combine "
+             "all-to-all; an explicit EP degree is not a knob yet."),
+            ("Weights / KV precision",
+             f"{cfg['dtype_weights']} / {cfg['dtype_kv']}"),
+            ("MFU / MBU",
+             f"{cfg['mfu'] * 100:.0f}% / {cfg['mbu'] * 100:.0f}%"),
+            ("Disaggregation", "none assumed",
+             "Prefill, midfill (prefill on cached context), and decode are "
+             "priced as colocated on one pool — disaggregated serving is "
+             "not modeled, and the traces don't record deployment topology."),
+        ], info_text="What this point's implied numbers are priced under — "
+                     "all global assumptions from the Explorer bar, applied "
+                     "identically to every request."),
+    ]
+
+
+def _summary_panel(arch, cfg, agg, all_selected: bool) -> list:
     totals = agg["totals"]
     wall_s = agg["wall_s_sum"]
     n_sub = sum(1 for p in agg["per_request"] if p["role"] == "subagent")
@@ -273,23 +448,4 @@ def _summary_panel(arch, gpu, cfg, agg, gpu_time, all_selected: bool) -> list:
              "PP=1)."),
         ], info_text="Interconnect traffic implied by the parallelism "
                      "assumptions from the Explorer assumption bar."),
-        _card(f"Single-GPU-equivalent time — {gpu['label']} "
-              f"({cfg['dtype_weights']}, MFU {cfg['mfu'] * 100:.0f}%, "
-              f"MBU {cfg['mbu'] * 100:.0f}%)", [
-            ("Prefill", fmt_seconds(gpu_time["prefill_s"])),
-            ("… bound by", gpu_time["prefill_bound"],
-             "Whichever takes longer decides: compute (FLOPs ÷ peak×MFU) or "
-             "memory (bytes ÷ bandwidth×MBU)."),
-            ("Decode", fmt_seconds(gpu_time["decode_s"])),
-            ("… bound by", gpu_time["decode_bound"],
-             "Whichever takes longer decides: compute (FLOPs ÷ peak×MFU) or "
-             "memory (bytes ÷ bandwidth×MBU)."),
-            ("Total", fmt_seconds(gpu_time["total_s"])),
-            ("Sustained GPUs (vs summed wall)",
-             f"{gpu_time['total_s'] / wall_s:.3g}" if wall_s > 0 else "n/a",
-             "GPU-seconds ÷ summed wall-clock: the average number of GPUs "
-             "this workload keeps busy end-to-end, idle time included."),
-        ], info_text="How long ONE such GPU would need for all the implied "
-                     "work, at the assumed utilization — the basis for the "
-                     "sustained-GPU counts in the conversation list."),
     ]
