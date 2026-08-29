@@ -29,8 +29,20 @@ Independent project — it imitates the InferenceX Explorer tab of
   Deep-dive's list.
 - **Turns tab** — histograms of per-turn context length, new (uncached) input, and output
   lengths; aggregated, and filterable to subsets by model and GPU type.
-- **Correlations tab** — select a range on one dimension (context, new-input, or decode size)
-  and see the conditional histograms of the other dimensions for that subset.
+- **Correlations tab** (redesigned bld 17) — bin-selection inspectors. Click bins (or
+  box-select) on ONE histogram to build the LIVE selection; that chart becomes its
+  controlling histogram (first bin anchors it; clicking a picked bin removes it, and
+  removing the last bin un-anchors). "Apply range" conditions the OTHER two histograms
+  on the matched requests, drawn in the selection's color and STACKED across
+  selections; "New selection" adds another color for side-by-side comparison. The full
+  pool always stays as a gray step silhouette and bin edges always come from the full
+  pool — conditioned charts NEVER re-range. Left-panel inspector sections (one per
+  selection, live one highlighted) show per-bin detail + conditional stats of the
+  other dims, and carry a clickable mini-strip of all bins to add/remove them.
+  Selections RESET when dataset / model / role / x-scale / Explorer selection change
+  (bin indices are positions in the current binning). State machine is pure in
+  correlations_data.py (initial_store/toggle_bin/add_bin_range/add_selection/…);
+  charts flex-fill the window height.
 - **Trace deep-dive tab** — implied FLOPs / memory / network aggregated over the
   CHECKED conversations (nothing checked = all). The conversation list is the SAME
   OBJECT as the Explorer list: one data callback feeds both tables identical rows, one
@@ -41,7 +53,8 @@ Independent project — it imitates the InferenceX Explorer tab of
   radio matrix (measures down the left, columns x|y1|y2|y3 — see modules/measures.py).
   Scale rule: ordinals (conv #, turn #) linear; every magnitude (time/tokens/bytes/
   FLOPs) log with values clamped UP to 1 unit so zeros/sub-unit values stay visible at
-  the axis floor. Dataset + assumptions come from Explorer ("any" → DEFAULT_ASSUMPTIONS
+  the axis floor. An x-scale radio (auto/linear/log, bld 17) can override the x
+  measure's natural scale; the three charts share one range-locked x axis either way. Dataset + assumptions come from Explorer ("any" → DEFAULT_ASSUMPTIONS
   in arch.py).
 - Purpose: explore compute activity and configuration potential implied by real agent traces.
 

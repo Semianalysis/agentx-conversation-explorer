@@ -1,13 +1,19 @@
-"""Correlations tab layout: condition on a range of one dimension, see the
-conditional histograms of the others. All Correlations dcc.Stores live here.
+"""Correlations tab layout: build color-coded bin SELECTIONS on one histogram
+each; 'Apply range' conditions the other histograms on the matched requests.
+Inspector sections (one per selection) live in the left panel and are
+rendered by the callbacks; the three histograms flex-fill the window height.
+All Correlations dcc.Stores live here.
 """
 from __future__ import annotations
 
 from dash import dcc, html
 
 from modules import controls
-from modules.theme import F_SMALL, GRAPH_CONFIG
+from modules.correlations_data import initial_store
 from modules.records import DIMENSIONS
+from modules.theme import F_SMALL, GRAPH_CONFIG
+
+_BTN_STYLE = {"fontSize": "12px", "padding": "3px 8px"}
 
 
 def layout() -> html.Div:
@@ -34,59 +40,79 @@ def layout() -> html.Div:
             value=["main", "subagent"],
             style={"fontSize": F_SMALL},
         ),
-        controls.label("Condition dimension",
-                       info_text="The dimension you slice on. Give it a range "
-                                 "below (or box-select on its histogram) and "
-                                 "the other two histograms redraw showing "
-                                 "ONLY the requests inside that range — the "
-                                 "conditional distributions."),
-        controls.dropdown(
-            "at-corr-cond-dim-dd", "dimension to condition on",
-            options=[{"label": DIMENSIONS[d]["label"], "value": d} for d in DIMENSIONS],
-            value="context", clearable=False),
-        controls.label("Condition range (tokens)",
-                       info_text="Token bounds of the conditioning slice. "
-                                 "Leave a side empty for open-ended. The "
-                                 "faint gray outline on the other histograms "
-                                 "is the unconditioned shape, rescaled, for "
-                                 "comparison."),
-        html.Div(style={"display": "flex", "gap": "6px"}, children=[
-            dcc.Input(id="at-corr-lo-input", type="number", placeholder="min",
-                      debounce=True, style={"width": "50%", "fontSize": F_SMALL}),
-            dcc.Input(id="at-corr-hi-input", type="number", placeholder="max",
-                      debounce=True, style={"width": "50%", "fontSize": F_SMALL}),
-        ]),
-        html.Div("…or box-select a range directly on the condition histogram.",
-                 style={"fontSize": "11px", "color": "#999", "margin": "4px 0"}),
-        html.Button("Clear range", id="at-corr-clear-btn", n_clicks=0,
-                    title="Drop the condition — all three histograms return "
-                          "to the unconditioned distributions.",
-                    style={"fontSize": F_SMALL, "marginTop": "4px"}),
         controls.label("X scale",
                        info_text="log bins: geometric bin edges — right for "
                                  "token counts spanning orders of magnitude "
                                  "(zeros land in the first bin, labeled 0→1). "
-                                 "linear bins: equal-width edges."),
+                                 "linear bins: equal-width edges. Changing "
+                                 "this re-bins the charts, so selections "
+                                 "reset (bin positions would otherwise refer "
+                                 "to different token ranges)."),
         dcc.RadioItems(
             id="at-corr-xscale-radio",
             options=[{"label": " log bins", "value": "log"},
                      {"label": " linear bins", "value": "linear"}],
             value="log", style={"fontSize": F_SMALL},
         ),
+        controls.label("Selections",
+                       info_text="Click bins (or box-select) on ONE histogram "
+                                 "to build the live selection — that chart "
+                                 "becomes its controlling histogram; clicking "
+                                 "a picked bin again removes it. Each "
+                                 "selection below shows per-bin detail and a "
+                                 "clickable strip to add/remove bins. 'New "
+                                 "selection' starts another color for "
+                                 "side-by-side comparison; 'Apply range' "
+                                 "draws each selection's matching requests "
+                                 "on the OTHER histograms (stacked, in the "
+                                 "selection's color) over the gray full "
+                                 "distribution. Selections reset when the "
+                                 "dataset, filters, x scale, or Explorer "
+                                 "selection change."),
+        html.Div(style={"display": "flex", "gap": "6px", "flexWrap": "wrap",
+                        "margin": "2px 0 6px"}, children=[
+            html.Button("New selection", id="at-corr-newsel-btn", n_clicks=0,
+                        title="Add another color-coded selection and make it "
+                              "live (bin clicks edit the live selection).",
+                        style=_BTN_STYLE),
+            html.Button("Apply range", id="at-corr-apply-btn", n_clicks=0,
+                        title="Condition the other histograms on each "
+                              "selection's bins: only matching requests are "
+                              "drawn, in the selection's color, stacked. "
+                              "Stays live — edits update the charts until "
+                              "you Clear.",
+                        style=_BTN_STYLE),
+            html.Button("Clear", id="at-corr-clear-btn", n_clicks=0,
+                        title="Drop all selections and un-condition the "
+                              "histograms.",
+                        style=_BTN_STYLE),
+        ]),
+        html.Div(id="at-corr-hint",
+                 style={"fontSize": "11px", "color": "#a60",
+                        "whiteSpace": "pre-wrap"}),
+        html.Div(id="at-corr-inspectors"),
         html.Div(id="at-corr-gate-status",
                  style={"fontSize": "12px", "color": "#666", "marginTop": "16px",
                         "fontFamily": "monospace", "whiteSpace": "pre-wrap"}),
     ])
 
-    graphs = [dcc.Graph(id=f"at-corr-graph-{dim}", config=GRAPH_CONFIG,
-                        style={"height": "270px"})
-              for dim in DIMENSIONS]
-    center = controls.center_column(graphs)
+    center = html.Div(
+        style={"flex": "1 1 0%", "minWidth": "0", "display": "flex",
+               "flexDirection": "column", "overflow": "hidden",
+               "padding": "4px 10px", "gap": "2px"},
+        children=[
+            # each histogram takes a third of the window height; responsive
+            # figures follow their container on resize
+            html.Div(dcc.Graph(id=f"at-corr-graph-{dim}", config=GRAPH_CONFIG,
+                               style={"height": "100%", "width": "100%"}),
+                     style={"flex": "1 1 0%", "minHeight": "0"})
+            for dim in DIMENSIONS
+        ],
+    )
 
     stores = [
         dcc.Store(id="at-corr-filter-store"),
-        # {'dim': ..., 'lo': tokens|None, 'hi': tokens|None}
-        dcc.Store(id="at-corr-condition-store"),
+        dcc.Store(id="at-corr-selections-store", data=initial_store()),
     ]
     return html.Div(id="at-corr-tab", style={"height": "100%"},
                     children=[controls.tab_root(side, center, stores)])
