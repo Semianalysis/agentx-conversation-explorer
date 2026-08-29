@@ -46,7 +46,13 @@ def layout() -> html.Div:
                        "flex": "0 0 auto"},
                 children=[
                     html.Button("Import / refresh datasets", id="at-overview-import-btn",
-                                n_clicks=0, style={"fontSize": F_BASE, "padding": "6px 14px"}),
+                                n_clicks=0,
+                                title="Fetch the dataset list and summary "
+                                      "stats from the AgentX API into the "
+                                      "local data/ cache. Per-conversation "
+                                      "traces are downloaded separately with "
+                                      "each dataset card's button.",
+                                style={"fontSize": F_BASE, "padding": "6px 14px"}),
                     dcc.Loading(html.Div(id="at-overview-import-status",
                                          style={"fontSize": F_SMALL, "color": "#555"}),
                                 type="dot"),

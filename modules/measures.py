@@ -23,38 +23,74 @@ def _clamp1(v: float) -> float:
 X_MEASURES = {
     "conv_number": dict(
         label="conversation #", scale="linear",
+        info="Conversation ordinal — its rank in the dataset's token-sorted "
+             "index (1 = most total input tokens). Same numbering as the '#' "
+             "column of the conversation list. Linear axis (it's an ordinal, "
+             "not a magnitude).",
         getter=lambda p: p["ord"]),
     "turn_number": dict(
         label="turn # (request seq in conv)", scale="linear",
+        info="Request sequence number within its conversation, in start-time "
+             "order. Main-agent and subagent requests both count. Linear axis.",
         getter=lambda p: p["seq"]),
     "cumulative_time": dict(
         label="cumulative time (s, ≥1)", scale="log",
+        info="Wall-clock seconds since the conversation's first request, at "
+             "this request's start. INCLUDES idle stretches when no request "
+             "was running (human think time, nights, weekends — often >80% of "
+             "a conversation's span), which appear as horizontal gaps. Log "
+             "axis; values under 1 s are shown at 1.",
         getter=lambda p: _clamp1(p["start_s"])),
+    "busy_time": dict(
+        label="busy time (s, active only, ≥1)", scale="log",
+        info="ACTIVE seconds elapsed at this request's start — time when at "
+             "least one request of the conversation (main or subagent) was in "
+             "flight. Idle gaps are compressed out, so this axis shows pure "
+             "serving activity; compare with cumulative time to see the idle "
+             "gaps. Log axis; values under 1 s are shown at 1.",
+        getter=lambda p: _clamp1(p["busy_s"])),
 }
 
 Y_MEASURES = {
     "context_tokens": dict(
         label="context size (tokens)", scale="log", cumulative=False,
+        info="Total input tokens of the request (cached + new) — the context "
+             "the model attends over.",
         getter=lambda p: _clamp1(p["in_tokens"])),
     "context_kv_bytes": dict(
         label="context KV-cache size (bytes)", scale="log", cumulative=False,
+        info="Bytes of KV cache the request's context occupies under the "
+             "selected architecture and KV precision (layers × KV entries per "
+             "token × bytes per entry).",
         getter=lambda p: _clamp1(p["kv_bytes"])),
     "new_input_tokens": dict(
         label="new input (uncached tokens, user/tool/agent)", scale="log",
         cumulative=False,
+        info="Uncached input tokens — new text (user message, tool results, "
+             "agent hand-offs) not already served from the prompt cache; this "
+             "is what prefill actually computes.",
         getter=lambda p: _clamp1(p["uncached_tokens"])),
     "new_output_tokens": dict(
         label="decode output per turn (tokens)", scale="log", cumulative=False,
+        info="Tokens decoded (generated) by this request.",
         getter=lambda p: _clamp1(p["out_tokens"])),
     "cumulative_output_tokens": dict(
         label="cumulative decode output (tokens, per conv)", scale="log",
         cumulative=True,
+        info="Running total of decoded tokens within the conversation, up to "
+             "and including this request. With few conversations selected, "
+             "drawn as one line per conversation.",
         getter=lambda p: _clamp1(p["cum_out"])),
     "cumulative_flops": dict(
         label="cumulative FLOPs (per conv)", scale="log", cumulative=True,
+        info="Running total of implied FLOPs (prefill + decode) within the "
+             "conversation under the selected architecture — implied by token "
+             "counts, not measured.",
         getter=lambda p: _clamp1(p["cum_flops"])),
     "current_flops": dict(
         label="request FLOPs", scale="log", cumulative=False,
+        info="Implied FLOPs of this single request (prefill + decode) under "
+             "the selected architecture.",
         getter=lambda p: _clamp1(p["flops"])),
 }
 

@@ -8,9 +8,20 @@ from modules.theme import F_SMALL, LEFT_W
 NONE = "-none-"  # null sentinel for all dropdowns
 
 
-def label(text: str) -> html.Div:
-    return html.Div(text, style={"fontSize": F_SMALL, "fontWeight": "600",
-                                 "margin": "10px 0 3px", "color": "#333"})
+def info(text: str) -> html.Span:
+    """Hoverable ⓘ tag — native browser tooltip via title=, so it works inside
+    any layout (labels, table notes, checklist options) with no extra deps.
+    Use for jargon and 'what can I do here' help that shouldn't fill the screen."""
+    return html.Span("ⓘ", title=text, style={
+        "cursor": "help", "color": "#4a90d9", "marginLeft": "5px",
+        "fontSize": "11px", "fontWeight": "400", "flex": "0 0 auto",
+        "userSelect": "none"})
+
+
+def label(text: str, info_text: str | None = None) -> html.Div:
+    children: list = [text] if info_text is None else [text, info(info_text)]
+    return html.Div(children, style={"fontSize": F_SMALL, "fontWeight": "600",
+                                     "margin": "10px 0 3px", "color": "#333"})
 
 
 def dropdown(id_: str, placeholder: str, multi: bool = False, **kwargs) -> dcc.Dropdown:

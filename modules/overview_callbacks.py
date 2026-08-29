@@ -7,17 +7,45 @@ from dash import ALL, Input, Output, State, callback_context, html
 from dash.exceptions import PreventUpdate
 
 from modules import api_client, records
+from modules.controls import info
 from modules.explorer_data import apply_selection
 from modules.theme import F_SMALL, MONO, color_for, fmt_count
 
 logger = logging.getLogger(__name__)
 
+# Hover-help for card stats, keyed by stat label (one source of truth for the
+# dataset cards AND the selection summary, which show the same stats).
+STAT_INFO = {
+    "Main-agent turns": "API requests made by the top-level agent of each "
+                        "conversation.",
+    "Subagent turns": "API requests made by nested agents spawned via tool "
+                      "calls — each runs with its own context.",
+    "Subagent groups": "Bursts of nested-agent activity: one group = one "
+                       "subagent tree spawned from a main-agent turn.",
+    "Input tokens": "Total input (context) tokens across all requests, cached "
+                    "+ uncached. Each request re-reads its whole context, so "
+                    "this grows quadratically with conversation length.",
+    "Output tokens": "Total decoded (generated) tokens across all requests.",
+    "Cached fraction": "Share of all input tokens served from the prompt "
+                       "cache (cached ÷ total input). High = most context "
+                       "re-reads are cache hits, not recomputed prefill.",
+    "Median reqs/conv": "Requests per conversation, counting main-agent AND "
+                        "subagent requests.",
+    "Mean reqs/conv": "Requests per conversation, counting main-agent AND "
+                      "subagent requests.",
+    "Cache block size": "Prompt-cache granularity — caching happens in blocks "
+                        "of this many tokens.",
+    "Conversations": None,
+}
+
 
 def _stat(label: str, value: str) -> html.Div:
+    tip = STAT_INFO.get(label)
     return html.Div(
         style={"display": "flex", "justifyContent": "space-between", "gap": "16px"},
         children=[
-            html.Span(label, style={"color": "#666"}),
+            html.Span([label, info(tip)] if tip else label,
+                      style={"color": "#666"}),
             html.Span(value, style={"fontFamily": MONO}),
         ],
     )
@@ -97,7 +125,12 @@ def _dataset_card(detail: dict, n_cached: int) -> html.Div:
                          html.Button(
                              "Download traces" if n_cached < n_convs else "Re-check traces",
                              id={"type": "at-overview-download-btn", "slug": slug},
-                             n_clicks=0, style={"fontSize": F_SMALL, "padding": "5px 12px"}),
+                             n_clicks=0,
+                             title="Download every conversation trace of this "
+                                   "dataset into the local data/ cache "
+                                   "(already-cached ones are skipped). The "
+                                   "other tabs read only this cache.",
+                             style={"fontSize": F_SMALL, "padding": "5px 12px"}),
                          html.Span(dl_label, style={"fontSize": F_SMALL, "fontFamily": MONO,
                                                     "color": "#2a7" if n_cached >= n_convs and n_convs else "#a60"}),
                          html.A("HuggingFace ↗", href=detail.get("hf_url") or "#",
