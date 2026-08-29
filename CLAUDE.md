@@ -13,12 +13,12 @@ Independent project — it imitates the InferenceX Explorer tab of
 
 - **One state, many viewports (standing principle, restated by the user 2026-08-29).**
   Dataset, conversation selection, and serving assumptions are GLOBAL — switching
-  tabs retains them. The dataset dropdowns on Explorer/Turns/Correlations are three
-  synced views of ONE value (sync_updates + self-loop callback in
-  explorer_callbacks); the conversation selection store and assumption config flow
-  from Explorer everywhere. Everything else a tab offers is a VIEWPORT option local
-  to that tab: axis/measure choices, log/linear scales, role and model filters, bin
-  counts, correlation inspectors/selections, list sort/filter.
+  tabs retains them. The dataset dropdowns on Explorer/Correlations are synced views
+  of ONE value (sync_updates + self-loop callback in explorer_callbacks); the
+  conversation selection store and assumption config flow from Explorer everywhere.
+  Everything else a tab offers is a VIEWPORT option local to that tab: axis/measure
+  choices, log/linear scales, role and model filters, correlation
+  inspectors/selections, list sort/filter.
 - **Overview tab** — import trace data, summarize the datasets found (counts, token totals,
   model mix, cached fraction). When an Explorer selection exists, a selection-scoped
   summary card renders above the dataset cards.
@@ -35,22 +35,26 @@ Independent project — it imitates the InferenceX Explorer tab of
   cell-drag ranges, and curve clicks all set the cross-tab selection store
   (`at-explorer-selection-store`), which scopes Overview/Turns/Correlations and
   Deep-dive's list.
-- **Turns tab** — histograms of per-turn context length, new (uncached) input, and output
-  lengths; aggregated, and filterable to subsets by model and GPU type.
-- **Correlations tab** (redesigned bld 17) — bin-selection inspectors. Click bins (or
-  box-select) on ONE histogram to build the LIVE selection; that chart becomes its
-  controlling histogram (first bin anchors it; clicking a picked bin removes it, and
-  removing the last bin un-anchors). "Apply range" conditions the OTHER two histograms
-  on the matched requests, drawn in the selection's color and STACKED across
-  selections; "New selection" adds another color for side-by-side comparison. The full
-  pool always stays as a gray step silhouette and bin edges always come from the full
-  pool — conditioned charts NEVER re-range. Left-panel inspector sections (one per
-  selection, live one highlighted) show per-bin detail + conditional stats of the
-  other dims, and carry a clickable mini-strip of all bins to add/remove them.
-  Selections RESET when dataset / model / role / x-scale / Explorer selection change
-  (bin indices are positions in the current binning). State machine is pure in
-  correlations_data.py (initial_store/toggle_bin/add_bin_range/add_selection/…);
-  charts flex-fill the window height.
+- **Turns tab** — DROPPED at bld 19 (user 2026-08-29: Correlations covers it). Its
+  pure binning helpers live on as modules/binning.py.
+- **Correlations tab** (redesigned bld 17, reworked bld 19) — bin-selection
+  inspectors. Click bins (or box-select) on ONE histogram to build the LIVE
+  selection; that chart becomes its controlling histogram (first bin anchors it;
+  clicking a picked bin removes it, removing the last un-anchors). Each inspector
+  section carries its OWN "apply: on/off" toggle (conditions the other two
+  histograms on its matched requests, drawn in its color, STACKED across applied
+  selections) and a Clear button color-coded to the selection (empties the section;
+  sections NEVER disappear — at least one always exists, an unused one is just empty
+  with apply off). "Add selection" sits below the sections. Guidance text: a comment
+  above Selections ("click a bar in a histogram to add or remove from current
+  selection") and a status line ("selections are in <chart(s)>" / "you may choose to
+  begin a selection in any chart"). The full pool always stays as a gray step
+  silhouette and bin edges always come from the full pool — conditioned charts NEVER
+  re-range. Inspector sections show per-bin detail + conditional stats of the other
+  dims via a clickable mini-strip of all bins. Selections RESET when dataset / model
+  / role / x-scale / Explorer selection change (bin indices are positions in the
+  current binning). State machine is pure in correlations_data.py; charts flex-fill
+  the window height.
 - **Trace deep-dive tab** — implied FLOPs / memory / network aggregated over the
   CHECKED conversations (nothing checked = all). The conversation list is the SAME
   OBJECT as the Explorer list: one data callback feeds both tables identical rows, one

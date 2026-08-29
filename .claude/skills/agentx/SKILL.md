@@ -40,11 +40,11 @@ said "resume", ask nothing and summarize where the last session left off from me
 - The user runs `python app.py` themselves. Verify changes with a temporary
   background instance, then STOP it and confirm port 8050 is free.
 - Wording: "Conversation Explorer" / "conversations" — never "Trace Explorer".
-- Tabs are alternate views of ONE state: dataset (dropdowns on Explorer/Turns/
-  Correlations are synced — one shared value), conversation selection, and serving
-  assumptions are GLOBAL (shared stores; the two conversation lists are the same
-  object). Everything else is a viewport option local to its tab (axis measures,
-  log/linear scales, roles, models, bins, correlation inspectors, sort/filter).
+- Tabs are alternate views of ONE state: dataset (dropdowns on Explorer/Correlations
+  are synced — one shared value), conversation selection, and serving assumptions
+  are GLOBAL (shared stores; the two conversation lists are the same object).
+  Everything else is a viewport option local to its tab (axis measures, log/linear
+  scales, roles, models, correlation inspectors, sort/filter).
 - Scale rule: ordinals (conv #, turn #) linear; magnitudes (time/tokens/bytes/FLOPs)
   log, clamped UP to 1 unit — never drop zeros.
 - Never fabricate values; missing/undefined → None and drop, with gate counts shown.

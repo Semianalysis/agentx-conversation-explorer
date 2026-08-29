@@ -1,12 +1,12 @@
 """Correlations tab callbacks.
 
 One MUTATION callback owns the selections-store: bin clicks and box-selects
-on the three histograms, clicks on inspector strips / headers / delete
-buttons, and the New/Apply/Clear buttons all converge on it. Changing the
-dataset, model/role filters, x scale, or the Explorer conversation selection
-RESETS the store — bin indices are positions in the current binning, and
-keeping them across a re-bin would silently condition on different token
-ranges.
+on the three histograms, clicks on inspector strips / headers / per-selection
+apply toggles / color-coded Clear buttons, and the Add-selection button all
+converge on it. Changing the dataset, model/role filters, x scale, or the
+Explorer conversation selection RESETS the store — bin indices are positions
+in the current binning, and keeping them across a re-bin would silently
+condition on different token ranges.
 
 One RENDER callback draws the three histograms and the inspector sections
 from (filters, selections) — the inspector and the charts can never disagree.
@@ -20,23 +20,25 @@ from dash.exceptions import PreventUpdate
 
 from modules import records
 from modules.correlations_data import (add_bin_range, add_selection, bin_runs,
-                                       bins_subset, delete_selection,
+                                       bins_subset, clear_selection,
                                        initial_store, selection_color,
-                                       set_applied, set_live, toggle_bin)
+                                       set_live, toggle_bin, toggle_on)
 from modules.explorer_data import apply_selection
 from modules.figures import (empty_figure, multi_histogram_figure,
                              selection_to_bins)
 from modules.records import DIMENSIONS
 from modules.theme import MONO
-from modules.turns_callbacks import cached_dataset_options
-from modules.turns_data import (bin_counts, dimension_values, edge_label,
+from modules.explorer_callbacks import cached_dataset_options
+from modules.binning import (bin_counts, dimension_values, edge_label,
                                 filter_records, make_bins, value_stats)
 
 logger = logging.getLogger(__name__)
 
 _N_BINS = 60
-# short dimension names for inspector headers ("Context length" etc.)
-_SHORT = {d: DIMENSIONS[d]["label"].split("(")[0].strip() for d in DIMENSIONS}
+# short dimension names for inspector headers and the status line
+_SHORT = {"context": "context length", "new_input": "new input",
+          "output": "decode output"}
+assert set(_SHORT) == set(DIMENSIONS), "short-name map out of sync with DIMENSIONS"
 
 
 def register_correlations_callbacks(app) -> None:
@@ -86,11 +88,10 @@ def register_correlations_callbacks(app) -> None:
         [Input(f"at-corr-graph-{dim}", "clickData") for dim in DIMENSIONS],
         [Input(f"at-corr-graph-{dim}", "selectedData") for dim in DIMENSIONS],
         Input("at-corr-newsel-btn", "n_clicks"),
-        Input("at-corr-apply-btn", "n_clicks"),
-        Input("at-corr-clear-btn", "n_clicks"),
         Input({"type": "at-corr-insp-bin", "sid": ALL, "bin": ALL}, "n_clicks"),
         Input({"type": "at-corr-insp-live", "sid": ALL}, "n_clicks"),
-        Input({"type": "at-corr-insp-del", "sid": ALL}, "n_clicks"),
+        Input({"type": "at-corr-insp-apply", "sid": ALL}, "n_clicks"),
+        Input({"type": "at-corr-insp-clear", "sid": ALL}, "n_clicks"),
         Input("at-corr-filter-store", "data"),
         Input("at-explorer-selection-store", "data"),
         State("at-corr-selections-store", "data"),
@@ -109,20 +110,10 @@ def register_correlations_callbacks(app) -> None:
             if trig in ("at-corr-filter-store", "at-explorer-selection-store"):
                 # re-bin -> old bin indices would mean different token ranges
                 return initial_store(), "", *reset
-            if trig == "at-corr-clear-btn":
-                if not tval:
-                    raise PreventUpdate
-                return initial_store(), "", *reset
             if trig == "at-corr-newsel-btn":
                 if not tval:
                     raise PreventUpdate
                 return add_selection(store), "", *reset
-            if trig == "at-corr-apply-btn":
-                if not tval:
-                    raise PreventUpdate
-                hint = ("" if any(s["bins"] for s in store["selections"])
-                        else "nothing to apply yet — click bins on a histogram first")
-                return set_applied(store, True), hint, *reset
 
             if isinstance(trig, str) and trig.startswith("at-corr-graph-"):
                 if not tval:  # clickData reset echo / cleared select box
@@ -157,8 +148,10 @@ def register_correlations_callbacks(app) -> None:
                     new = toggle_bin(store, sid, sel["dim"], trig["bin"])
                 elif trig["type"] == "at-corr-insp-live":
                     new = set_live(store, sid)
-                elif trig["type"] == "at-corr-insp-del":
-                    new = delete_selection(store, sid)
+                elif trig["type"] == "at-corr-insp-apply":
+                    new = toggle_on(store, sid)
+                elif trig["type"] == "at-corr-insp-clear":
+                    new = clear_selection(store, sid)
                 else:
                     raise PreventUpdate
                 return new, "", *reset
@@ -175,6 +168,7 @@ def register_correlations_callbacks(app) -> None:
     @app.callback(
         [Output(f"at-corr-graph-{dim}", "figure") for dim in DIMENSIONS],
         Output("at-corr-inspectors", "children"),
+        Output("at-corr-selection-status", "children"),
         Output("at-corr-gate-status", "children"),
         Input("at-corr-filter-store", "data"),
         Input("at-corr-selections-store", "data"),
@@ -189,7 +183,7 @@ def register_correlations_callbacks(app) -> None:
                 return (*figs,
                         html.Div("pick a dataset",
                                  style={"fontSize": "11px", "color": "#999"}),
-                        "")
+                        "", "")
             pool = records.load_records(filters["slug"])
             pool, sel_gates = apply_selection(pool, conv_selection, filters["slug"])
             filtered, gates = filter_records(
@@ -216,7 +210,6 @@ def register_correlations_callbacks(app) -> None:
                                  "color": selection_color(s["sid"]),
                                  "subset": subset})
 
-            applied = bool(store.get("applied"))
             figs = []
             for d in DIMENSIONS:
                 pv = values_by_dim[d]
@@ -231,8 +224,8 @@ def register_correlations_callbacks(app) -> None:
                        if r["sel"]["dim"] == d and r["sel"]["bins"]]
                 overlays = [(dimension_values(r["subset"], d), r["color"], r["name"])
                             for r in sel_rows
-                            if applied and r["subset"] is not None
-                            and r["sel"]["dim"] != d] if applied else []
+                            if r["sel"]["on"] and r["subset"] is not None
+                            and r["sel"]["dim"] != d]
                 figs.append(multi_histogram_figure(
                     pv, DIMENSIONS[d]["label"] + (" — conditioned" if overlays else ""),
                     log_x, _N_BINS, own_marks=own, overlays=overlays,
@@ -243,11 +236,18 @@ def register_correlations_callbacks(app) -> None:
                                    len(filtered))
                 for r in sel_rows
             ]
+            active_dims = []  # dims holding selection bins, first-seen order
+            for r in sel_rows:
+                d = r["sel"]["dim"]
+                if r["sel"]["bins"] and d and d not in active_dims:
+                    active_dims.append(d)
+            status = ("selections are in " +
+                      " and ".join(_SHORT[d] for d in active_dims)
+                      if active_dims
+                      else "you may choose to begin a selection in any chart")
             gate_txt = "rows through gates:\n" + " → ".join(
                 f"{k}={v:,}" for k, v in gates.items())
-            gate_txt += ("\nconditioning: applied"
-                         if applied else "\nconditioning: off — press Apply range")
-            return *figs, inspectors, gate_txt
+            return *figs, inspectors, status, gate_txt
         except Exception:
             logger.exception("correlations render failed")
             raise PreventUpdate
@@ -256,11 +256,14 @@ def register_correlations_callbacks(app) -> None:
 def _inspector_section(row: dict, store: dict, edges_by_dim: dict,
                        counts_by_dim: dict, n_pool: int) -> html.Div:
     """One left-panel section per selection: clickable header (makes it
-    live), delete button, a clickable per-bin strip of its controlling
-    histogram, and per-bin/aggregate detail for the selected bins."""
+    live), per-selection apply on/off toggle, color-coded Clear button, a
+    clickable per-bin strip of its controlling histogram, and per-bin /
+    aggregate detail for the selected bins. Sections never disappear — an
+    unused selection is just empty with its apply toggle off."""
     s, color, name = row["sel"], row["color"], row["name"]
     live = s["sid"] == store["live"]
     dim = s["dim"]
+    on = bool(s["on"])
 
     header_children = [
         html.Span(style={"width": "10px", "height": "10px", "borderRadius": "5px",
@@ -280,12 +283,29 @@ def _inspector_section(row: dict, store: dict, edges_by_dim: dict,
         style={"display": "flex", "alignItems": "center", "gap": "6px",
                "cursor": "pointer", "flex": "1 1 auto", "fontSize": "12px",
                "fontWeight": "700" if live else "400", "minWidth": "0"})
-    del_btn = html.Button(
-        "×", id={"type": "at-corr-insp-del", "sid": s["sid"]}, n_clicks=0,
-        title="Delete this selection.",
-        style={"fontSize": "11px", "padding": "0 6px", "lineHeight": "16px",
-               "flex": "0 0 auto"})
-    kids: list = [html.Div([header, del_btn],
+    apply_btn = html.Button(
+        f"apply: {'on' if on else 'off'}",
+        id={"type": "at-corr-insp-apply", "sid": s["sid"]}, n_clicks=0,
+        disabled=not s["bins"],
+        title="Toggle conditioning: while ON, the other histograms draw this "
+              "selection's matching requests in its color (stacked with other "
+              "applied selections). Off (and disabled) while the selection is "
+              "empty.",
+        style={"fontSize": "11px", "padding": "0 8px", "lineHeight": "18px",
+               "flex": "0 0 auto", "borderRadius": "3px",
+               "border": f"1px solid {color if on else '#bbb'}",
+               "background": color if on else "white",
+               "color": "white" if on else "#666",
+               "cursor": "pointer"})
+    clear_btn = html.Button(
+        "Clear", id={"type": "at-corr-insp-clear", "sid": s["sid"]}, n_clicks=0,
+        title="Empty this selection (its bins, anchor, and apply toggle). "
+              "The section stays for reuse.",
+        style={"fontSize": "11px", "padding": "0 8px", "lineHeight": "18px",
+               "flex": "0 0 auto", "borderRadius": "3px",
+               "border": f"1px solid {color}", "background": "white",
+               "color": color, "cursor": "pointer"})
+    kids: list = [html.Div([header, apply_btn, clear_btn],
                            style={"display": "flex", "alignItems": "center",
                                   "gap": "6px"})]
 

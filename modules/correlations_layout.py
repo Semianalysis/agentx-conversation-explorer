@@ -1,8 +1,9 @@
 """Correlations tab layout: build color-coded bin SELECTIONS on one histogram
-each; 'Apply range' conditions the other histograms on the matched requests.
-Inspector sections (one per selection) live in the left panel and are
-rendered by the callbacks; the three histograms flex-fill the window height.
-All Correlations dcc.Stores live here.
+each; each selection's own apply toggle conditions the other histograms on
+its matched requests. Inspector sections (one per selection, never fewer
+than one) live in the left panel and are rendered by the callbacks; 'Add
+selection' always sits below them; the three histograms flex-fill the window
+height. All Correlations dcc.Stores live here.
 """
 from __future__ import annotations
 
@@ -57,43 +58,37 @@ def layout() -> html.Div:
                      {"label": " linear bins", "value": "linear"}],
             value="log", style={"fontSize": F_SMALL},
         ),
+        html.Div("Click a bar in a histogram to add or remove from current "
+                 "selection.",
+                 style={"fontSize": "11px", "color": "#666", "marginTop": "14px",
+                        "fontStyle": "italic"}),
         controls.label("Selections",
                        info_text="Click bins (or box-select) on ONE histogram "
                                  "to build the live selection — that chart "
                                  "becomes its controlling histogram; clicking "
                                  "a picked bin again removes it. Each "
                                  "selection below shows per-bin detail and a "
-                                 "clickable strip to add/remove bins. 'New "
-                                 "selection' starts another color for "
-                                 "side-by-side comparison; 'Apply range' "
-                                 "draws each selection's matching requests "
+                                 "clickable strip to add/remove bins. Its "
+                                 "'apply' toggle draws its matching requests "
                                  "on the OTHER histograms (stacked, in the "
                                  "selection's color) over the gray full "
-                                 "distribution. Selections reset when the "
-                                 "dataset, filters, x scale, or Explorer "
-                                 "selection change."),
-        html.Div(style={"display": "flex", "gap": "6px", "flexWrap": "wrap",
-                        "margin": "2px 0 6px"}, children=[
-            html.Button("New selection", id="at-corr-newsel-btn", n_clicks=0,
-                        title="Add another color-coded selection and make it "
-                              "live (bin clicks edit the live selection).",
-                        style=_BTN_STYLE),
-            html.Button("Apply range", id="at-corr-apply-btn", n_clicks=0,
-                        title="Condition the other histograms on each "
-                              "selection's bins: only matching requests are "
-                              "drawn, in the selection's color, stacked. "
-                              "Stays live — edits update the charts until "
-                              "you Clear.",
-                        style=_BTN_STYLE),
-            html.Button("Clear", id="at-corr-clear-btn", n_clicks=0,
-                        title="Drop all selections and un-condition the "
-                              "histograms.",
-                        style=_BTN_STYLE),
-        ]),
+                                 "distribution; its color-coded Clear button "
+                                 "empties it (the section stays). 'Add "
+                                 "selection' below starts another color for "
+                                 "side-by-side comparison. Selections reset "
+                                 "when the dataset, filters, x scale, or "
+                                 "Explorer selection change."),
+        html.Div(id="at-corr-selection-status",
+                 style={"fontSize": "11px", "color": "#666",
+                        "margin": "0 0 4px"}),
         html.Div(id="at-corr-hint",
                  style={"fontSize": "11px", "color": "#a60",
                         "whiteSpace": "pre-wrap"}),
         html.Div(id="at-corr-inspectors"),
+        html.Button("Add selection", id="at-corr-newsel-btn", n_clicks=0,
+                    title="Add another color-coded selection and make it "
+                          "live (bin clicks edit the live selection).",
+                    style={**_BTN_STYLE, "marginTop": "8px"}),
         html.Div(id="at-corr-gate-status",
                  style={"fontSize": "12px", "color": "#666", "marginTop": "16px",
                         "fontFamily": "monospace", "whiteSpace": "pre-wrap"}),

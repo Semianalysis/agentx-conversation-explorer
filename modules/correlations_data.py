@@ -2,14 +2,17 @@
 
 The tab's state is a list of SELECTIONS (at-corr-selections-store). Each
 selection owns a set of bins of ONE controlling histogram (its `dim`,
-anchored by the first bin picked); once the store is 'applied', the OTHER
-histograms draw the conditional distribution of the requests matching those
-bins, in the selection's color, stacked across selections. Exactly one
-selection is 'live' — bin clicks edit it.
+anchored by the first bin picked) and its own apply toggle `on`: while on,
+the OTHER histograms draw the conditional distribution of the requests
+matching its bins, in the selection's color, stacked across selections.
+Exactly one selection is 'live' — bin clicks edit it. Selections never
+disappear on their own: at least one section always exists, and clearing
+empties a section rather than removing it.
 
 Store shape:
-  {"live": sid, "applied": bool, "next_sid": int,
-   "selections": [{"sid": int, "dim": str|None, "bins": [int, ...]}]}
+  {"live": sid, "next_sid": int,
+   "selections": [{"sid": int, "dim": str|None, "bins": [int, ...],
+                   "on": bool}]}
 
 Every mutation returns a NEW store (copy-on-write; stores are immutable
 archives). All logic here is Dash-free — this is the unit-test surface.
@@ -18,7 +21,7 @@ from __future__ import annotations
 
 from modules.records import DIMENSIONS
 from modules.theme import PALETTE
-from modules.turns_data import bin_index
+from modules.binning import bin_index
 
 MAX_SELECTIONS = 10
 
@@ -28,15 +31,17 @@ def selection_color(sid: int) -> str:
     return PALETTE[sid % len(PALETTE)]
 
 
+def _empty_selection(sid: int) -> dict:
+    return {"sid": sid, "dim": None, "bins": [], "on": False}
+
+
 def initial_store() -> dict:
-    """One empty live selection, nothing applied."""
-    return {"live": 0, "applied": False, "next_sid": 1,
-            "selections": [{"sid": 0, "dim": None, "bins": []}]}
+    """One empty live selection, apply off."""
+    return {"live": 0, "next_sid": 1, "selections": [_empty_selection(0)]}
 
 
 def _copy(store: dict) -> dict:
-    return {"live": store["live"], "applied": store["applied"],
-            "next_sid": store["next_sid"],
+    return {"live": store["live"], "next_sid": store["next_sid"],
             "selections": [dict(s, bins=list(s["bins"]))
                            for s in store["selections"]]}
 
@@ -69,8 +74,9 @@ def toggle_bin(store: dict, sid: int, dim: str, bin_idx: int) -> dict:
     _anchor(sel, dim)
     if bin_idx in sel["bins"]:
         sel["bins"].remove(bin_idx)
-        if not sel["bins"]:
+        if not sel["bins"]:  # empty again: un-anchored, apply off
             sel["dim"] = None
+            sel["on"] = False
     else:
         sel["bins"] = sorted(sel["bins"] + [int(bin_idx)])
     return out
@@ -94,21 +100,27 @@ def add_selection(store: dict) -> dict:
         raise ValueError(f"at most {MAX_SELECTIONS} selections")
     sid = out["next_sid"]
     out["next_sid"] += 1
-    out["selections"].append({"sid": sid, "dim": None, "bins": []})
+    out["selections"].append(_empty_selection(sid))
     out["live"] = sid
     return out
 
 
-def delete_selection(store: dict, sid: int) -> dict:
-    """Remove a selection; the panel always keeps at least one (empty) section."""
+def clear_selection(store: dict, sid: int) -> dict:
+    """Empty a selection (bins gone, un-anchored, apply off). The section
+    itself stays — selections never disappear, they just go empty."""
     out = _copy(store)
-    out["selections"] = [s for s in out["selections"] if s["sid"] != sid]
-    if not out["selections"]:
-        new_sid = out["next_sid"]
-        out["next_sid"] += 1
-        out["selections"] = [{"sid": new_sid, "dim": None, "bins": []}]
-    if all(s["sid"] != out["live"] for s in out["selections"]):
-        out["live"] = out["selections"][-1]["sid"]
+    sel = get_selection(out, sid)
+    sel["dim"] = None
+    sel["bins"] = []
+    sel["on"] = False
+    return out
+
+
+def toggle_on(store: dict, sid: int) -> dict:
+    """Flip one selection's apply toggle (conditioning the other charts)."""
+    out = _copy(store)
+    sel = get_selection(out, sid)
+    sel["on"] = not sel["on"]
     return out
 
 
@@ -116,12 +128,6 @@ def set_live(store: dict, sid: int) -> dict:
     out = _copy(store)
     get_selection(out, sid)  # KeyError on phantom sid
     out["live"] = sid
-    return out
-
-
-def set_applied(store: dict, applied: bool = True) -> dict:
-    out = _copy(store)
-    out["applied"] = bool(applied)
     return out
 
 

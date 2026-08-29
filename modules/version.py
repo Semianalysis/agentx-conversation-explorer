@@ -6,4 +6,4 @@ always shows the running server's build — if the number on screen doesn't
 match this file, the browser is showing a stale page.
 """
 
-APP_BUILD = 18
+APP_BUILD = 19
