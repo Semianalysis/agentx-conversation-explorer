@@ -85,6 +85,9 @@ def multi_histogram_figure(
     n = len(edges) - 1
     if len(pool_heights) != n:
         raise ValueError(f"{len(pool_heights)} heights for {n} bins")
+    for hts, _color, name in overlays:
+        if len(hts) != n:
+            raise ValueError(f"overlay {name!r}: {len(hts)} heights for {n} bins")
     idx = list(range(n))
     max_h = max(pool_heights) or 1
 
@@ -105,18 +108,20 @@ def multi_histogram_figure(
         hoverinfo="skip", name="all rows",
     ))
     for bins, color, name in own_marks:
-        xs = [b for b in bins if 0 <= b < n]
-        if not xs:
+        bset = {b for b in bins if 0 <= b < n}
+        if not bset:
             continue
+        # full-length trace, zero height off the selected bins: a bar trace
+        # with only sparse x positions makes plotly auto-derive the bar WIDTH
+        # from the gap between them (two selected bins 30 apart rendered as
+        # 30-bin-wide slabs); spanning every index keeps widths uniform
         fig.add_trace(go.Bar(
-            x=xs, y=[pool_heights[b] for b in xs],
+            x=idx, y=[pool_heights[b] if b in bset else 0 for b in idx],
             marker_color=color, opacity=0.45, marker_line_width=0,
             hoverinfo="skip", name=f"{name} bins",
         ))
     base = [0.0] * n
     for hts, color, name in overlays:
-        if len(hts) != n:
-            raise ValueError(f"overlay {name!r}: {len(hts)} heights for {n} bins")
         fig.add_trace(go.Bar(
             x=idx, y=hts, base=list(base),
             marker_color=color, marker_line_width=0, opacity=0.9,
