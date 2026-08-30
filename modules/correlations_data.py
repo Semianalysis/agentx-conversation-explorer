@@ -1,13 +1,8 @@
 """Pure data + state helpers for the Correlations tab.
 
-CHARTS: three histogram charts (slots y1/y2/y3), each with a picked Y
-measure, sharing one X mode:
-  x = 'token_count'  -> each chart bins requests over ITS OWN y measure's
-                        values; bar height = request count.
-  x = positional     -> all charts share bins over turn # / cumulative time /
-                        busy time; bar height = SUM of the chart's y measure
-                        in the bin (how much happened when).
-Measures are getters over the ENRICHED per-request rows produced by
+CHARTS: three histogram charts (slots y1/y2/y3 - displayed as x1/x2/x3),
+each binning requests over ITS OWN picked X measure; bar height is ALWAYS
+the request count in the bin (log or linear y). Measures are getters over the ENRICHED per-request rows produced by
 deepdive_data.aggregate_selection (seq / start_s / busy_s / kv_bytes / flops),
 so KV bytes and FLOPs follow the global serving assumptions.
 
@@ -35,55 +30,40 @@ from modules.theme import PALETTE
 MAX_SELECTIONS = 10
 CHART_SLOTS = ("y1", "y2", "y3")
 
-# --- Measure registry (getters over enriched per-request rows) --------------
+# --- Measure registry (per-chart X measures; y is always request count) ----
 
-X_MEASURES = {
-    "token_count": dict(
-        label="token count (per-measure bins)",
-        info="Classic histogram mode: each chart bins requests over its OWN "
-             "y measure's values (tokens, bytes, or FLOPs) and counts them. "
-             "The three charts have independent bin edges.",
-        getter=None),  # sentinel: bins come from each chart's own y measure
+MEASURES = {
     "turn_number": dict(
         label="turn # (request seq in conv)",
         info="Bins requests by their sequence number within their "
-             "conversation (main and subagent requests both count). All "
-             "three charts share these bins, and bar height becomes the SUM "
-             "of each chart's measure in the bin.",
+             "conversation (main and subagent requests both count).",
         getter=lambda p: p["seq"]),
     "cumulative_time": dict(
         label="cumulative time (s)",
         info="Bins requests by wall-clock seconds since their conversation's "
-             "first request — idle stretches included. All three charts "
-             "share these bins, and bar height becomes the SUM of each "
-             "chart's measure in the bin.",
+             "first request - idle stretches included.",
         getter=lambda p: p["start_s"]),
     "busy_time": dict(
         label="busy time (s, active only)",
         info="Bins requests by ACTIVE seconds elapsed at their start (time "
-             "when at least one request of the conversation was in flight — "
-             "idle gaps compressed out). All three charts share these bins, "
-             "and bar height becomes the SUM of each chart's measure in the "
-             "bin.",
+             "when at least one request of the conversation was in flight - "
+             "idle gaps compressed out).",
         getter=lambda p: p["busy_s"]),
-}
-
-Y_MEASURES = {
+    "kv_cache_tokens": dict(
+        label="KV cache (tokens)",
+        info="Context tokens held in the KV cache - the request's total "
+             "input (cached + new). Architecture-independent; the byte size "
+             "is this times KV bytes/token under the assumptions.",
+        getter=lambda p: p["in_tokens"]),
     "kv_cache_bytes": dict(
         label="KV cache size (bytes)",
         info="KV-cache bytes of the request's context under the selected "
              "architecture and KV precision (from the Explorer assumption "
              "bar).",
         getter=lambda p: p["kv_bytes"]),
-    "kv_cache_tokens": dict(
-        label="KV cache (tokens)",
-        info="Context tokens held in the KV cache — the request's total "
-             "input (cached + new). Architecture-independent; the byte size "
-             "is this times KV bytes/token under the assumptions.",
-        getter=lambda p: p["in_tokens"]),
     "new_input": dict(
         label="uncached input (tokens)",
-        info="Uncached input tokens — new text (user message, tool results, "
+        info="Uncached input tokens - new text (user message, tool results, "
              "agent hand-offs) not already served from the prompt cache; "
              "this is what prefill actually computes.",
         getter=lambda p: p["uncached_tokens"]),
@@ -98,17 +78,13 @@ Y_MEASURES = {
         getter=lambda p: p["flops"]),
 }
 
-ALL_MEASURES = {**X_MEASURES, **Y_MEASURES}
-DEFAULT_AXES = {"x": "turn_number", "y1": "kv_cache_tokens",
-                "y2": "new_input", "y3": "decode_output"}
+DEFAULT_AXES = {"y1": "kv_cache_tokens", "y2": "new_input",
+                "y3": "decode_output"}
 
 
 def measure_values(rows: list[dict], key: str) -> list[float]:
-    """One measure over enriched rows. KeyError on unknown key; ValueError on
-    the x-sentinel (it has no getter — each chart bins its own y measure)."""
-    getter = ALL_MEASURES[key]["getter"]
-    if getter is None:
-        raise ValueError(f"measure {key!r} is a binning mode, not a value")
+    """One measure over enriched rows. KeyError on unknown key."""
+    getter = MEASURES[key]["getter"]
     return [getter(p) for p in rows]
 
 

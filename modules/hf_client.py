@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 
 import requests
 
@@ -111,6 +112,49 @@ def _fetch_rows(dataset_id: str, offset: int, length: int) -> dict:
     return r.json()
 
 
+# --- Background import (one at a time; polled by a dcc.Interval) ----------
+_BG = {"running": False, "queue": [], "current": None, "done_convs": 0,
+       "total_convs": None, "done_datasets": [], "error": None, "dirty": False}
+
+
+def start_background_import(dataset_ids: list[str]) -> None:
+    """Import datasets on a daemon thread; progress via import_progress().
+    Raises if an import is already running or the list is empty."""
+    if _BG["running"]:
+        raise ValueError("an import is already running")
+    if not dataset_ids:
+        raise ValueError("no datasets selected")
+    _BG.update(running=True, queue=list(dataset_ids), current=None,
+               done_convs=0, total_convs=None, done_datasets=[], error=None,
+               dirty=False)
+    threading.Thread(target=_run_imports, args=(list(dataset_ids),),
+                     daemon=True).start()
+
+
+def _run_imports(ids: list[str]) -> None:
+    try:
+        for ds in ids:
+            _BG.update(current=ds, done_convs=0, total_convs=None)
+            import_dataset(ds)
+            _BG["done_datasets"].append(ds)
+            _BG["queue"].remove(ds)
+    except Exception as e:
+        logger.exception("background import failed")
+        _BG["error"] = f"{_BG['current']}: {e}"
+    finally:
+        _BG.update(running=False, current=None, dirty=True)
+
+
+def import_progress() -> dict:
+    return dict(_BG)
+
+
+def consume_dirty() -> bool:
+    d = _BG["dirty"]
+    _BG["dirty"] = False
+    return d
+
+
 def local_hf_datasets() -> list[dict]:
     """Registry cards for locally imported HF datasets (detail.json scan)."""
     out = []
@@ -180,6 +224,7 @@ def import_dataset(dataset_id: str, limit: int | None = None) -> dict:
             totals["subagentTurns"] += len(sub_turns)
             totals["subagentGroups"] += t["numSubagentGroups"]
         offset += len(page["rows"])
+        _BG["done_convs"], _BG["total_convs"] = offset, n_rows
         if not page["rows"]:
             raise ValueError(f"{dataset_id}: rows API returned an empty page "
                              f"at offset {offset} of {n_rows}")
