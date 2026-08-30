@@ -81,18 +81,6 @@ def bin_counts(values: list[float], edges: list[float], log_x: bool) -> list[int
     return counts
 
 
-def bin_weighted(values: list[float], edges: list[float], log_x: bool,
-                 weights: list[float]) -> list[float]:
-    """Sum of weights per bin (bin_index rules): the 'how much happened in
-    this bin' histogram. len(weights) must match len(values)."""
-    if len(weights) != len(values):
-        raise ValueError(f"{len(weights)} weights for {len(values)} values")
-    sums = [0.0] * (len(edges) - 1)
-    for v, w in zip(values, weights):
-        sums[bin_index(edges, v, log_x)] += w
-    return sums
-
-
 def _bisect(edges: list[float], x: float) -> int:
     lo, hi = 0, len(edges) - 2
     while lo < hi:

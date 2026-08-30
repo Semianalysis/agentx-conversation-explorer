@@ -295,63 +295,100 @@ def register_overview_callbacks(app) -> None:
                 return html.Div("no datasets visible for "
                                 f"{', '.join(hf_client.hf_sources())}",
                                 style={"fontSize": F_SMALL, "color": "#999"})
-            out = []
+            from dash import dcc
+            opts, rows_out = [], []
             for d in rows:
-                badge = ("PRIVATE" if d["private"] else "public")
-                action = (html.Button(
-                    "Import", id={"type": "at-overview-hf-import-btn",
-                                  "ds": d["id"]}, n_clicks=0,
-                    title="Download every conversation from HuggingFace and "
-                          "flatten it into the local cache (same format as "
-                          "published datasets; can take minutes).",
-                    style={"fontSize": "11px", "padding": "1px 8px"})
-                    if d["importable"] else
-                    html.Span("schema not supported",
-                              style={"fontSize": "11px", "color": "#999"}))
-                out.append(html.Div(
-                    style={"display": "flex", "alignItems": "center",
-                           "gap": "10px", "fontSize": "12px",
-                           "fontFamily": MONO, "padding": "1px 0"},
-                    children=[
-                        html.Span(d["id"], style={"flex": "0 0 480px",
-                                                  "overflow": "hidden",
-                                                  "textOverflow": "ellipsis"}),
-                        html.Span(d["updated"], style={"color": "#666"}),
-                        html.Span(badge,
-                                  style={"color": "#a33" if d["private"] else "#2a7"}),
-                        html.Span(f"imported: {d['imported_convs']} convs"
-                                  if d["imported_convs"] else "",
-                                  style={"color": "#2a7"}),
-                        action,
-                    ]))
-            return out
+                badge = "PRIVATE" if d["private"] else "public"
+                extra = (f"  [{badge}, {d['updated']}"
+                         + (f", imported {d['imported_convs']} convs"
+                            if d["imported_convs"] else "")
+                         + "]")
+                if d["importable"]:
+                    opts.append({"label": " " + d["id"] + extra,
+                                 "value": d["id"]})
+                else:
+                    rows_out.append(html.Div(
+                        d["id"] + extra + "  - schema not supported",
+                        style={"fontSize": "12px", "fontFamily": MONO,
+                               "color": "#999", "padding": "1px 0 1px 22px"}))
+            return [dcc.Checklist(
+                id="at-overview-hf-select-cl", options=opts, value=[],
+                labelStyle={"display": "block", "fontFamily": MONO,
+                            "fontSize": "12px"})] + rows_out
         except Exception:
             logger.exception("internal dataset listing failed")
             return html.Div("listing FAILED — see server log (is HF_TOKEN "
                             "valid?)", style={"fontSize": F_SMALL, "color": "#a33"})
 
     @app.callback(
-        Output("at-overview-cache-store", "data", allow_duplicate=True),
         Output("at-overview-hf-status", "children"),
-        Input({"type": "at-overview-hf-import-btn", "ds": ALL}, "n_clicks"),
+        Input("at-overview-hf-load-btn", "n_clicks"),
+        State("at-overview-hf-select-cl", "value"),
+        prevent_initial_call=True,
+    )
+    def start_load(n, selected):
+        try:
+            if not n:
+                raise PreventUpdate
+            hf_client.start_background_import(selected or [])
+            return f"loading {len(selected)} dataset(s) in the background..."
+        except PreventUpdate:
+            raise
+        except ValueError as e:
+            return str(e)
+        except Exception:
+            logger.exception("background import start failed")
+            return "start FAILED - see server log"
+
+    @app.callback(
+        Output("at-overview-hf-progress", "children"),
+        Output("at-overview-cache-store", "data", allow_duplicate=True),
+        Input("at-overview-hf-interval", "n_intervals"),
         State("at-overview-cache-store", "data"),
         prevent_initial_call=True,
     )
-    def import_internal(n_clicks_list, cache_counts):
+    def poll_progress(_n, cache_counts):
+        """1 Hz poll of the background importer: progress bar while running,
+        Done/FAILED message after; refreshes the cache-store once when a
+        finished import marks state dirty (dropdowns + cards update)."""
         try:
-            trig = callback_context.triggered_id
-            tval = (callback_context.triggered[0]["value"]
-                    if callback_context.triggered else None)
-            if not isinstance(trig, dict) or not tval:
+            p = hf_client.import_progress()
+            cache_update = no_update
+            if hf_client.consume_dirty():
+                records.clear_pools()
+                cache_counts = dict(cache_counts or {})
+                for d in hf_client.local_hf_datasets():
+                    cache_counts[d["slug"]] = d["conversation_count"]
+                cache_update = cache_counts
+            if p["running"]:
+                done, total = p["done_convs"], p["total_convs"]
+                pct = int(100 * done / total) if total else 0
+                bar = html.Div(
+                    style={"width": "420px", "height": "10px",
+                           "background": "#eee", "borderRadius": "4px"},
+                    children=html.Div(style={
+                        "width": f"{pct}%", "height": "100%",
+                        "background": "#2a7", "borderRadius": "4px"}))
+                label = (f"{p['current']}: {done}/{total or '?'} conversations"
+                         f" - {len(p['done_datasets'])} dataset(s) finished, "
+                         f"{len(p['queue'])} queued")
+                return html.Div([bar, html.Div(label, style={
+                    "fontSize": "12px", "fontFamily": MONO})]), cache_update
+            if p["error"]:
+                return html.Div("FAILED: " + p["error"],
+                                style={"fontSize": "12px", "color": "#a33"}), \
+                    cache_update
+            if p["done_datasets"]:
+                return html.Div(
+                    f"Done - imported {len(p['done_datasets'])} dataset(s): "
+                    + ", ".join(p["done_datasets"]),
+                    style={"fontSize": "12px", "color": "#2a7",
+                           "fontWeight": "600"}), cache_update
+            if cache_update is no_update:
                 raise PreventUpdate
-            detail = hf_client.import_dataset(trig["ds"])
-            cache_counts = dict(cache_counts or {})
-            cache_counts[detail["slug"]] = detail["conversation_count"]
-            records.clear_pools()
-            return cache_counts, (f"imported {detail['slug']}: "
-                                  f"{detail['conversation_count']} conversations")
+            return no_update, cache_update
         except PreventUpdate:
             raise
-        except Exception as e:
-            logger.exception("internal dataset import failed")
-            return no_update, f"import FAILED: {e}"
+        except Exception:
+            logger.exception("progress poll failed")
+            raise PreventUpdate

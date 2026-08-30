@@ -94,6 +94,13 @@ Independent project — it imitates the InferenceX Explorer tab of
 Data-source findings and open questions: `docs/data-source-notes.md`.
 Interaction/layout patterns to imitate: `docs/ix-explorer-reference.md`.
 
+Correlations bld 26 (user correction): x1/x2/x3 = per-chart X MEASURES (internal
+slot ids stay y1/y2/y3); y axis is ALWAYS request count with a Y-scale
+linear/log radio (yscale never resets selections; measure/x-scale changes do).
+The positional sum mode and bin_weighted are deleted. Internal panel bld 26:
+checkbox selection + one background 'Load selected' (thread + 1 Hz dcc.Interval
+progress bar + Done message; hf_client._BG state).
+
 Internal sources (bld 25): AGENTX_INTERNAL=1 reveals the Overview "Internal
 sources" panel (HF org listings via AGENTX_HF_SOURCES, private access via the
 user's HF_TOKEN — the security boundary is HF's ACL, never app code; no

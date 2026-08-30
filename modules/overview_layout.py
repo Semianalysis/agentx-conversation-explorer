@@ -71,6 +71,20 @@ def _internal_section() -> html.Div:
                                      type="dot"),
                      ]),
             html.Div(id="at-overview-hf-list"),
+            html.Div(style={"display": "flex", "alignItems": "center",
+                            "gap": "12px", "marginTop": "8px"},
+                     children=[
+                         html.Button("Load selected",
+                                     id="at-overview-hf-load-btn", n_clicks=0,
+                                     title="Import every checked dataset in "
+                                           "the background (raw traces from "
+                                           "HuggingFace; can take minutes "
+                                           "per dataset).",
+                                     style={"fontSize": F_SMALL,
+                                            "padding": "4px 10px"}),
+                         html.Div(id="at-overview-hf-progress"),
+                     ]),
+            dcc.Interval(id="at-overview-hf-interval", interval=1000),
         ],
     )
 
