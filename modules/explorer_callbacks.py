@@ -33,12 +33,16 @@ DEFAULT_DATASET_SLUG = "cc-traces-weka-062126"
 
 def cached_dataset_options() -> list[dict]:
     """Datasets with at least one cached conversation (dropdown options for
-    every tab that offers the shared dataset picker)."""
-    opts = []
+    every tab that offers the shared dataset picker). Locally imported
+    internal (HF) datasets are included — they exist only on this user's
+    disk, so listing them exposes nothing in the public build."""
+    from modules import hf_client
     try:
-        datasets = api_client.fetch_datasets()
+        datasets = list(api_client.fetch_datasets())
     except Exception:
-        return []
+        datasets = []
+    datasets += hf_client.local_hf_datasets()
+    opts = []
     for d in datasets:
         n = len(api_client.cached_conversation_ids(d["slug"]))
         if n:

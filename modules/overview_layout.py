@@ -32,6 +32,49 @@ def _initial_cache_counts() -> dict:
             for d in _initial_datasets()}
 
 
+def _internal_section() -> html.Div:
+    """Internal (unpublished) sources — rendered ONLY in internal mode
+    (AGENTX_INTERNAL=1). The public build shows nothing: no names, no
+    controls; listings are fetched live from HF, and private datasets appear
+    only if the user's own HF_TOKEN can read them."""
+    from modules import hf_client
+    from modules.controls import info
+    if not hf_client.internal_mode():
+        return html.Div(id="at-overview-hf-list", style={"display": "none"})
+    return html.Div(
+        style={"marginTop": "22px", "borderTop": "2px dashed #ca8",
+               "paddingTop": "10px"},
+        children=[
+            html.Div(["Internal sources — unpublished datasets",
+                      info("Visible because AGENTX_INTERNAL=1. Lists every "
+                           "dataset of the configured HF namespaces "
+                           "(AGENTX_HF_SOURCES, default semianalysisai) — "
+                           "with an HF_TOKEN set, private datasets your "
+                           "token can read appear too, so access follows "
+                           "HuggingFace's own permissions, per user. "
+                           "Importing flattens the raw traces locally into "
+                           "the same format as published datasets; every "
+                           "tab can then explore them. Nothing here exists "
+                           "in the public build.")],
+                     style={"fontWeight": "700", "fontSize": F_BASE,
+                            "display": "flex", "alignItems": "center"}),
+            html.Div(style={"display": "flex", "alignItems": "center",
+                            "gap": "12px", "margin": "8px 0"},
+                     children=[
+                         html.Button("List internal datasets",
+                                     id="at-overview-hf-list-btn", n_clicks=0,
+                                     style={"fontSize": F_SMALL,
+                                            "padding": "4px 10px"}),
+                         dcc.Loading(html.Div(id="at-overview-hf-status",
+                                              style={"fontSize": F_SMALL,
+                                                     "color": "#555"}),
+                                     type="dot"),
+                     ]),
+            html.Div(id="at-overview-hf-list"),
+        ],
+    )
+
+
 def layout() -> html.Div:
     return html.Div(
         id="at-overview-tab",
@@ -70,6 +113,7 @@ def layout() -> html.Div:
                         style={"display": "flex", "flexWrap": "wrap", "gap": "14px",
                                "alignItems": "flex-start"},
                     ),
+                    _internal_section(),
                 ],
             ),
         ],
