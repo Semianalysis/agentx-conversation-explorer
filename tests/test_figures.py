@@ -53,5 +53,31 @@ class TestMultiHistogramFigure(unittest.TestCase):
                                    overlays=[([1.0] * 9, "#111111", "S1")])
 
 
+class TestGroupedSingleConversation(unittest.TestCase):
+    def test_mean_line_drawn_for_one_conversation(self):
+        # regression: grouped mode fell back to markers when n_convs == 1
+        from modules.arch import ARCHITECTURES, resolve_assumptions
+        from modules.deepdive_data import aggregate_selection
+        from modules.deepdive_callbacks import _measure_figure
+
+        def _rec(i, start):
+            return {"uid": f"cA#{i}", "conv_id": "cA", "role": "main",
+                    "agent_id": None, "depth": 0, "model": "m",
+                    "in_tokens": 1000 + i, "cached_tokens": 900,
+                    "uncached_tokens": 100 + i, "out_tokens": 50,
+                    "start_s": start, "end_s": start + 1.0, "turn_index": i}
+
+        pool = [_rec(i, float(i * 10)) for i in range(5)]
+        arch_key, _, cfg = resolve_assumptions(None)
+        agg = aggregate_selection(pool, ["cA"], ARCHITECTURES[arch_key], cfg,
+                                  {"cA": 1})
+        fig = _measure_figure(agg["per_request"], "busy_time",
+                              "context_tokens", n_convs=1, grouped=True,
+                              envelope="p1090")
+        modes = [t.mode for t in fig.data]
+        self.assertTrue(all("lines" in m for m in modes), modes)
+        self.assertIn("mean of alive convs", [t.name for t in fig.data])
+
+
 if __name__ == "__main__":
     unittest.main()
