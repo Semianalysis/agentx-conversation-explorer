@@ -278,7 +278,10 @@ def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
         xm["scale"] = x_scale
     fig = go.Figure()
     title = ym["label"] + (" — magnified 5×" if magnified else "")
-    if grouped and x_key != "conv_number" and n_convs > 1:
+    # n_convs == 1 still draws the grouped line (the mean of one
+    # conversation IS that conversation, binned) — a >1 guard here made the
+    # mean toggle silently dead for single-conversation selections
+    if grouped and x_key != "conv_number":
         g = grouped_series(per_req, x_key, y_key)
         band = {"minmax": (("min of any conv", g["lo"]),
                            ("max of any conv", g["hi"])),
