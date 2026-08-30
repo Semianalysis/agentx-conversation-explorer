@@ -29,9 +29,9 @@ class TestMeasureRegistry(unittest.TestCase):
 
     def test_getters_read_enriched_rows(self):
         row = {"seq": 7, "start_s": 100.0, "busy_s": 40.0, "kv_bytes": 5e9,
-               "in_tokens": 2000, "uncached_tokens": 123, "out_tokens": 45,
-               "flops": 1e12}
-        self.assertEqual(measure_values([row], "kv_cache_tokens"), [2000])
+               "in_tokens": 2000, "cached_tokens": 1877,
+               "uncached_tokens": 123, "out_tokens": 45, "flops": 1e12}
+        self.assertEqual(measure_values([row], "kv_cache_tokens"), [1877])
         self.assertEqual(measure_values([row], "turn_number"), [7])
         self.assertEqual(measure_values([row], "busy_time"), [40.0])
         self.assertEqual(measure_values([row], "turn_flops"), [1e12])
