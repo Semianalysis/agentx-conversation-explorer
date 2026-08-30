@@ -10,7 +10,7 @@ def _fig(own_bins=None, overlays=None):
     edges = make_bins(values, 10, log_x=False)
     heights = [10.0] * 10
     return multi_histogram_figure(
-        edges, heights, "t", "x", "requests", False, False,
+        edges, heights, "t", "x", "requests", False,
         own_marks=[(own_bins, "#123456", "S1")] if own_bins else [],
         overlays=overlays or [])
 
@@ -46,10 +46,10 @@ class TestMultiHistogramFigure(unittest.TestCase):
         edges = make_bins(values, 10, log_x=False)
         with self.assertRaises(ValueError):
             multi_histogram_figure(edges, [1.0] * 9, "t", "x", "y", False,
-                                   False, own_marks=[], overlays=[])
+                                   own_marks=[], overlays=[])
         with self.assertRaises(ValueError):
             multi_histogram_figure(edges, [1.0] * 10, "t", "x", "y", False,
-                                   False, own_marks=[],
+                                   own_marks=[],
                                    overlays=[([1.0] * 9, "#111111", "S1")])
 
 

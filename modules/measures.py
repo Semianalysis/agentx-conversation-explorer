@@ -96,8 +96,8 @@ Y_MEASURES = {
 
 ALL_MEASURES = {**X_MEASURES, **Y_MEASURES}
 
-DEFAULT_AXES = {"x": "cumulative_time", "y1": "context_tokens",
-                "y2": "cumulative_flops", "y3": "current_flops"}
+DEFAULT_AXES = {"x": "busy_time", "y1": "context_tokens",
+                "y2": "new_input_tokens", "y3": "new_output_tokens"}
 
 
 def measure_series(per_request: list[dict], key: str) -> list[float]:

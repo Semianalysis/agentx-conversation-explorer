@@ -123,17 +123,19 @@ def layout() -> html.Div:
                      {"label": " linear bins", "value": "linear"}],
             value="log", style={"fontSize": F_SMALL},
         ),
-        controls.label("Y scale",
-                       info_text="Scale of the request-count axis. Log keeps "
-                                 "small bins visible next to dominant ones; "
-                                 "switching does not re-bin, so selections "
-                                 "survive."),
-        dcc.RadioItems(
-            id="at-corr-yscale-radio",
-            options=[{"label": " linear", "value": "linear"},
-                     {"label": " log", "value": "log"}],
-            value="linear", style={"fontSize": F_SMALL},
-        ),
+        controls.label("Turn range (zoom)",
+                       info_text="Restrict every chart to requests whose "
+                                 "turn # (sequence in conversation) lies in "
+                                 "[first, last]. Leave empty for open ends. "
+                                 "Changing it re-bins, so selections reset."),
+        html.Div(style={"display": "flex", "gap": "6px"}, children=[
+            dcc.Input(id="at-corr-turnlo-input", type="number",
+                      placeholder="first turn", debounce=True,
+                      style={"width": "50%", "fontSize": F_SMALL}),
+            dcc.Input(id="at-corr-turnhi-input", type="number",
+                      placeholder="last turn", debounce=True,
+                      style={"width": "50%", "fontSize": F_SMALL}),
+        ]),
         html.Div("Click a bar in a histogram to add or remove from current "
                  "selection.",
                  style={"fontSize": "11px", "color": "#666", "marginTop": "14px",

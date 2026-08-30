@@ -169,20 +169,29 @@ def layout() -> html.Div:
                             "Replace per-request markers with the MEAN across "
                             "the selected conversations at each x position. A "
                             "conversation only contributes while it still has "
-                            "requests — once it ends it drops out of the "
+                            "requests - once it ends it drops out of the "
                             "stats, never padded with defaults.")],
                         style={"display": "inline"}),
                      "value": "grouped"},
-                    {"label": html.Span([
-                        " dotted min/max envelope",
-                        controls.info(
-                            "With grouped mode on, adds dotted lines tracking "
-                            "the lowest and highest single-conversation value "
-                            "at each x position.")],
-                        style={"display": "inline"}),
-                     "value": "envelope"},
                 ],
-                value=[], style={"fontSize": "11px", "marginTop": "6px"}),
+                value=["grouped"], style={"fontSize": "11px", "marginTop": "6px"}),
+            html.Div(["envelope:",
+                      controls.info(
+                          "Dotted band around the grouped mean. 10%/90% = the "
+                          "10th and 90th percentile single-conversation value "
+                          "at each x (robust to outliers); min-max = the "
+                          "extreme conversations; none = mean line only.")],
+                     style={"fontSize": "11px", "color": "#666",
+                            "marginTop": "4px", "display": "flex",
+                            "alignItems": "center"}),
+            dcc.RadioItems(
+                id="at-deep-envelope-radio",
+                options=[{"label": " 10%/90%", "value": "p1090"},
+                         {"label": " min-max", "value": "minmax"},
+                         {"label": " none", "value": "none"}],
+                value="p1090", inline=True,
+                labelStyle={"marginRight": "8px"},
+                style={"fontSize": "11px"}),
             html.Div("Grouped mode: at each x, conversations that have ended "
                      "drop out of mean/min/max — never padded with a default.",
                      style={"fontSize": "10px", "color": "#aaa", "marginTop": "2px"}),

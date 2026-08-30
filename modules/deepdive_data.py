@@ -111,7 +111,7 @@ def grouped_series(per_request: list[dict], x_key: str, y_key: str,
     per-conversation means.
     x='conv_number' cannot be grouped (each x IS one conversation) -> ValueError.
 
-    Returns {'xs', 'mean', 'lo', 'hi', 'n_alive'} (aligned lists, xs ascending).
+    Returns {'xs', 'mean', 'lo', 'hi', 'p10', 'p90', 'n_alive'} (aligned lists, xs ascending).
     """
     from modules.measures import ALL_MEASURES  # measures has no dash imports
 
@@ -141,12 +141,16 @@ def grouped_series(per_request: list[dict], x_key: str, y_key: str,
             mid = lo_x * math.exp(log_ratio * (b + 0.5))
             acc.setdefault(mid, {}).setdefault(p["cid"], []).append(yg(p))
 
-    xs, mean, lo, hi, n_alive = [], [], [], [], []
+    xs, mean, lo, hi, p10, p90, n_alive = [], [], [], [], [], [], []
     for x in sorted(acc):
-        conv_means = [sum(v) / len(v) for v in acc[x].values()]
+        conv_means = sorted(sum(v) / len(v) for v in acc[x].values())
+        n = len(conv_means)
         xs.append(x)
-        mean.append(sum(conv_means) / len(conv_means))
-        lo.append(min(conv_means))
-        hi.append(max(conv_means))
-        n_alive.append(len(conv_means))
-    return {"xs": xs, "mean": mean, "lo": lo, "hi": hi, "n_alive": n_alive}
+        mean.append(sum(conv_means) / n)
+        lo.append(conv_means[0])
+        hi.append(conv_means[-1])
+        p10.append(conv_means[min(int(0.10 * n), n - 1)])
+        p90.append(conv_means[min(int(0.90 * n), n - 1)])
+        n_alive.append(n)
+    return {"xs": xs, "mean": mean, "lo": lo, "hi": hi,
+            "p10": p10, "p90": p90, "n_alive": n_alive}

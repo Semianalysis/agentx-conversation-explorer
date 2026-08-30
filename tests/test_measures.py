@@ -225,7 +225,11 @@ class TestGroupedSeries(unittest.TestCase):
     def test_envelope_brackets_mean(self):
         g = self.grouped_series(self.agg["per_request"], "cumulative_time",
                                 "new_output_tokens", n_bins=10)
-        for lo, m, hi in zip(g["lo"], g["mean"], g["hi"]):
+        for lo, p10, m, p90, hi in zip(g["lo"], g["p10"], g["mean"],
+                                       g["p90"], g["hi"]):
+            self.assertLessEqual(lo, p10)
+            self.assertLessEqual(p10, p90)   # band ordered
+            self.assertLessEqual(p90, hi)
             self.assertLessEqual(lo, m)
             self.assertLessEqual(m, hi)
 

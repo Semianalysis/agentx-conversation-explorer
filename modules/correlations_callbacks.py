@@ -100,11 +100,13 @@ def register_correlations_callbacks(app) -> None:
         Input("at-corr-models-dd", "value"),
         Input("at-corr-roles-cl", "value"),
         Input("at-corr-xscale-radio", "value"),
+        Input("at-corr-turnlo-input", "value"),
+        Input("at-corr-turnhi-input", "value"),
         prevent_initial_call=True,
     )
-    def coalesce_filters(slug, models, roles, xscale):
+    def coalesce_filters(slug, models, roles, xscale, turn_lo, turn_hi):
         return {"slug": slug, "models": models or [], "roles": roles or [],
-                "xscale": xscale}
+                "xscale": xscale, "turn_lo": turn_lo, "turn_hi": turn_hi}
 
     @app.callback(
         Output("at-corr-axes-store", "data"),
@@ -217,10 +219,9 @@ def register_correlations_callbacks(app) -> None:
         Input("at-corr-selections-store", "data"),
         Input("at-explorer-selection-store", "data"),
         Input("at-explorer-config-store", "data"),
-        Input("at-corr-yscale-radio", "value"),
         prevent_initial_call=True,
     )
-    def render(filters, axes, store, conv_selection, config, yscale):
+    def render(filters, axes, store, conv_selection, config):
         try:
             no_cursor = [""] * len(CHART_SLOTS)
             if not filters or not filters.get("slug"):
@@ -235,11 +236,16 @@ def register_correlations_callbacks(app) -> None:
                 raise PreventUpdate  # radios not initialized yet
             store = store or initial_store()
             log_x = filters["xscale"] == "log"
-            log_y = yscale == "log"
 
             enriched = _enriched_rows(filters["slug"], conv_selection, config)
             filtered, gates = filter_records(
                 enriched, {"models": filters["models"], "roles": filters["roles"]})
+            lo_t, hi_t = filters.get("turn_lo"), filters.get("turn_hi")
+            if lo_t is not None or hi_t is not None:
+                filtered = [r for r in filtered
+                            if (lo_t is None or r["seq"] >= lo_t)
+                            and (hi_t is None or r["seq"] <= hi_t)]
+                gates["n_turn_range"] = len(filtered)
             if not filtered:
                 gate_txt = " -> ".join(f"{k}={v:,}" for k, v in gates.items())
                 figs = [empty_figure(MEASURES[axes[c]]["label"],
@@ -268,7 +274,9 @@ def register_correlations_callbacks(app) -> None:
                     members = [j for j, m in enumerate(mask) if m]
                 sel_rows.append({"sel": s, "name": f"S{i + 1}",
                                  "color": selection_color(s["sid"]),
-                                 "members": members})
+                                 "members": members,
+                                 "member_seqs": ([filtered[j]["seq"] for j in members]
+                                                 if members else [])})
 
             figs = []
             for c in CHART_SLOTS:
@@ -288,7 +296,7 @@ def register_correlations_callbacks(app) -> None:
                     " — conditioned" if overlays else "")
                 figs.append(multi_histogram_figure(
                     edges[c], heights[c], title,
-                    MEASURES[axes[c]]["label"], "requests", log_x, log_y,
+                    MEASURES[axes[c]]["label"], "requests", log_x,
                     own_marks=own, overlays=overlays,
                     stat_values=bin_vals[c]))
 
@@ -406,6 +414,13 @@ def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
             kids.append(html.Div(
                 f"{len(members):,} requests matched ({pct:.1f}% of pool)",
                 style={**mono11, "color": "#222", "marginTop": "4px"}))
+            if row["member_seqs"]:
+                seqs = row["member_seqs"]
+                kids.append(html.Div(
+                    f"turns {min(seqs):,} … {max(seqs):,} contribute",
+                    title="First and last turn # (request sequence in its "
+                          "conversation) among the matched requests.",
+                    style=mono11))
             runs = bin_runs(s["bins"])
             run_lines = [
                 f"[{edge_label(e[a])}, {edge_label(e[b + 1])}): "

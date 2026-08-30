@@ -300,8 +300,10 @@ def register_overview_callbacks(app) -> None:
             for d in rows:
                 badge = "PRIVATE" if d["private"] else "public"
                 extra = (f"  [{badge}, {d['updated']}"
-                         + (f", imported {d['imported_convs']} convs"
-                            if d["imported_convs"] else "")
+                         + (f", PARTIAL {d['imported_convs']} convs - will resume"
+                            if d.get("resumable")
+                            else (f", imported {d['imported_convs']} convs"
+                                  if d["imported_convs"] else ""))
                          + "]")
                 if d["importable"]:
                     opts.append({"label": " " + d["id"] + extra,
