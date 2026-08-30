@@ -222,8 +222,9 @@ class TestSweepPoints(unittest.TestCase):
         self.assertLessEqual(max(ts), 45.0)             # stops at 2-conv end
         self.assertEqual(len(ts), 10)                   # dense data: all kept
         for p in sw["points"]:                          # averages of members
-            self.assertGreaterEqual(p["context_tokens"], 1000)
-            self.assertLessEqual(p["context_tokens"], 3000)
+            # cached context at turn start (in_t - unc(100)), NOT total input
+            self.assertGreaterEqual(p["cached_context_tokens"], 900)
+            self.assertLessEqual(p["cached_context_tokens"], 2900)
             self.assertGreater(p["n_requests"], 0)
         # no model / GPU keys anywhere - simulation sweeps those
         self.assertFalse(any("model" in p or "gpu" in p for p in sw["points"]))

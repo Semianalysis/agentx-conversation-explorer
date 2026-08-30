@@ -83,7 +83,8 @@ def sweep_points(per_request: list[dict], x_key: str,
     """Sample the grouped mean-of-conversations timeline into simulator sweep
     points: n_points evenly spaced x positions from ZERO to the last x at
     which at least 2 conversations were still sampled (2nd-largest per-conv
-    max). Each point averages context tokens / new ISL / expected OSL over
+    max). Each point averages the THREE distinct simulation drivers —
+    cached context at turn start / new ISL (uncached) / expected OSL — over
     the requests in its half-step window — model and GPU deliberately absent
     (the simulation sweeps those). Windows with no requests are SKIPPED,
     never fabricated. Raises on unsupported x measures or < 2 conversations.
@@ -112,7 +113,8 @@ def sweep_points(per_request: list[dict], x_key: str,
         n = len(rows)
         points.append({
             x_key: round(t, 3),
-            "context_tokens": round(sum(p["in_tokens"] for p in rows) / n),
+            "cached_context_tokens": round(
+                sum(p["cached_tokens"] for p in rows) / n),
             "new_isl_tokens": round(sum(p["uncached_tokens"] for p in rows) / n),
             "expected_osl_tokens": round(sum(p["out_tokens"] for p in rows) / n),
             "n_requests": n,
