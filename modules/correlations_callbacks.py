@@ -240,7 +240,12 @@ def register_correlations_callbacks(app) -> None:
             enriched = _enriched_rows(filters["slug"], conv_selection, config)
             filtered, gates = filter_records(
                 enriched, {"models": filters["models"], "roles": filters["roles"]})
-            lo_t, hi_t = filters.get("turn_lo"), filters.get("turn_hi")
+            def _num(v):  # number inputs can deliver strings; '' = unset
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+            lo_t, hi_t = _num(filters.get("turn_lo")), _num(filters.get("turn_hi"))
             if lo_t is not None or hi_t is not None:
                 filtered = [r for r in filtered
                             if (lo_t is None or r["seq"] >= lo_t)

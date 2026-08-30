@@ -199,6 +199,44 @@ class TestZoomHelpers(unittest.TestCase):
         self.assertEqual(members, {"a"})
 
 
+class TestSweepPoints(unittest.TestCase):
+    def _agg(self, pool, ids, ords):
+        from modules.deepdive_data import aggregate_selection
+        arch_key, _, cfg = resolve_assumptions(None)
+        return aggregate_selection(pool, ids, ARCHITECTURES[arch_key], cfg, ords)
+
+    def test_even_spacing_zero_start_and_two_conv_stop(self):
+        from modules.deepdive_data import sweep_points
+        # cA spans 0..90s, cB spans 0..45s, cC dies at 9s -> t_last = 45 (2nd max)
+        pool = ([_rec("cA", i, start=float(i * 10), end=i * 10 + 1, in_t=1000,
+                      unc=100, out=50) for i in range(10)]
+                + [_rec("cB", i, start=float(i * 5), end=i * 5 + 1, in_t=3000,
+                        unc=300, out=150) for i in range(10)]
+                + [_rec("cC", 0, start=9.0, end=10.0)])
+        agg = self._agg(pool, ["cA", "cB", "cC"], {"cA": 1, "cB": 2, "cC": 3})
+        sw = sweep_points(agg["per_request"], "cumulative_time")
+        self.assertEqual(sw["t_last"], 45.0)
+        ts = [p["cumulative_time"] for p in sw["points"]]
+        self.assertEqual(ts[0], 0.0)                    # includes time zero
+        self.assertLessEqual(max(ts), 45.0)             # stops at 2-conv end
+        self.assertEqual(len(ts), 10)                   # dense data: all kept
+        for p in sw["points"]:                          # averages of members
+            self.assertGreaterEqual(p["context_tokens"], 1000)
+            self.assertLessEqual(p["context_tokens"], 3000)
+            self.assertGreater(p["n_requests"], 0)
+        # no model / GPU keys anywhere - simulation sweeps those
+        self.assertFalse(any("model" in p or "gpu" in p for p in sw["points"]))
+
+    def test_guards(self):
+        from modules.deepdive_data import sweep_points
+        pool = [_rec("cA", 0, start=0.0, end=1.0)]
+        agg = self._agg(pool, ["cA"], {"cA": 1})
+        with self.assertRaises(ValueError):
+            sweep_points(agg["per_request"], "cumulative_time")  # 1 conv
+        with self.assertRaises(ValueError):
+            sweep_points(agg["per_request"], "conv_number")      # bad x
+
+
 class TestGroupedSeries(unittest.TestCase):
     def setUp(self):
         from modules.deepdive_data import grouped_series

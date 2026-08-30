@@ -14,7 +14,7 @@ from dash.exceptions import PreventUpdate
 from modules import api_client, controls, records, theme
 from modules.arch import ARCHITECTURES, request_compute, resolve_assumptions
 from modules.deepdive_data import (aggregate_selection, grouped_series,
-                                   zoom_member_uids)
+                                   sweep_points, zoom_member_uids)
 from modules.explorer_data import build_conversation_table
 from modules.figures import empty_figure
 from modules.measures import (ALL_MEASURES, X_MEASURES, Y_MEASURES, axis_units,
@@ -214,6 +214,50 @@ def register_deepdive_callbacks(app) -> None:
             raise
         except Exception:
             logger.exception("deep-dive render failed")
+            raise PreventUpdate
+
+
+    @app.callback(
+        Output("at-deep-sweep-dl", "data"),
+        Input("at-deep-sweep-btn", "n_clicks"),
+        State("at-explorer-selection-store", "data"),
+        State("at-explorer-config-store", "data"),
+        State("at-explorer-filter-store", "data"),
+        State("at-deep-axes-store", "data"),
+        prevent_initial_call=True,
+    )
+    def export_sweep(n, selection, config, filters, axes):
+        """Download simulator sweep points sampled from the current grouped
+        mean (10 evenly spaced x positions, averages of the contributing
+        requests; see deepdive_data.sweep_points)."""
+        try:
+            if not n:
+                raise PreventUpdate
+            slug = (filters or {}).get("slug")
+            axes = axes or {}
+            if not slug or axes.get("x") not in X_MEASURES:
+                raise PreventUpdate
+            import json as _json
+
+            from dash import dcc as _dcc
+            arch_key, _g, cfg = resolve_assumptions(config)
+            pool = records.load_records(slug)
+            index_ids = [it["conv_id"]
+                         for it in api_client.fetch_conversation_index(slug)]
+            ordinal = {cid: i + 1 for i, cid in enumerate(index_ids)}
+            sel_ids = list((selection or {}).get("conv_ids") or [])                 if (selection or {}).get("slug") == slug else []
+            agg = aggregate_selection(pool, sel_ids or index_ids,
+                                      ARCHITECTURES[arch_key], cfg, ordinal)
+            sweep = sweep_points(agg["per_request"], axes["x"])
+            sweep.update(dataset=slug,
+                         selection=f"{len(sel_ids) or 'all'} conversations")
+            return _dcc.send_string(
+                _json.dumps(sweep, indent=1),
+                f"sweep-{slug}-{axes['x']}.json")
+        except PreventUpdate:
+            raise
+        except Exception:
+            logger.exception("sweep export failed")
             raise PreventUpdate
 
 
