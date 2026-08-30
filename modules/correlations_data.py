@@ -56,12 +56,6 @@ MEASURES = {
              "then prefills. Architecture-independent; the byte size is this "
              "times KV bytes/token under the assumptions.",
         getter=lambda p: p["cached_tokens"]),
-    "kv_cache_bytes": dict(
-        label="cached KV at turn start (bytes)",
-        info="Bytes the cached prefix occupies in the KV cache at the turn's "
-             "start, under the selected architecture and KV precision (from "
-             "the Explorer assumption bar).",
-        getter=lambda p: p["kv_bytes"]),
     "new_input": dict(
         label="uncached input (tokens)",
         info="Uncached input tokens - new text (user message, tool results, "
@@ -72,11 +66,6 @@ MEASURES = {
         label="decode output (tokens)",
         info="Tokens decoded (generated) by the request.",
         getter=lambda p: p["out_tokens"]),
-    "turn_flops": dict(
-        label="turn FLOPs",
-        info="Implied FLOPs of the request (prefill + decode) under the "
-             "selected architecture from the Explorer assumption bar.",
-        getter=lambda p: p["flops"]),
 }
 
 DEFAULT_AXES = {"y1": "kv_cache_tokens", "y2": "new_input",

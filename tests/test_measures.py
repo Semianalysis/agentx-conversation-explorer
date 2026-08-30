@@ -63,14 +63,10 @@ class TestMeasureRegistry(unittest.TestCase):
                                rows[0]["flops"] + rows[1]["flops"])
         self.assertGreater(rows[1]["cum_flops"], rows[0]["cum_flops"])
 
-    def test_kv_bytes_enrichment(self):
-        p = self.agg["per_request"][0]
-        kv_per_tok = (self.arch["n_layers"]
-                      * self.arch["kv_entries_per_token_per_layer"]
-                      * DTYPE_BYTES[self.cfg["dtype_kv"]])
-        # cached-at-turn-start semantics (user 2026-08-30), NOT total input
-        self.assertEqual(p["kv_bytes"], p["cached_tokens"] * kv_per_tok)
-        self.assertEqual(measure_series([p], "context_kv_bytes")[0], p["kv_bytes"])
+    def test_no_hardware_measures(self):
+        # FLOPs / byte measures removed 2026-08-30 (simulation's job)
+        for key in ("context_kv_bytes", "cumulative_flops", "current_flops"):
+            self.assertNotIn(key, Y_MEASURES)
 
     def test_unknown_measure_raises(self):
         with self.assertRaises(KeyError):

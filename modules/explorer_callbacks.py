@@ -10,10 +10,7 @@ from dash import Input, Output, State, callback_context, no_update
 from dash.exceptions import PreventUpdate
 
 from modules import api_client, records, theme
-from modules.arch import resolve_assumptions
-from modules.controls import NONE
 from modules.explorer_data import (CURVE_X_MEASURES,
-                                   augment_rows_with_compute,
                                    build_conversation_table,
                                    conversation_curves, sync_updates)
 from modules.explorer_layout import TABLE_COLUMNS
@@ -176,33 +173,12 @@ def register_explorer_callbacks(app) -> None:
         return {"slug": slug}
 
     @app.callback(
-        Output("at-explorer-config-store", "data"),
-        Input("at-explorer-arch-dd", "value"),
-        Input("at-explorer-gpu-dd", "value"),
-        Input("at-explorer-wdtype-dd", "value"),
-        Input("at-explorer-kvdtype-dd", "value"),
-        Input("at-explorer-tp-dd", "value"),
-        Input("at-explorer-pp-dd", "value"),
-        Input("at-explorer-dp-dd", "value"),
-        Input("at-explorer-mfu-dd", "value"),
-        Input("at-explorer-mbu-dd", "value"),
-    )
-    def coalesce_config(arch, gpu, wdtype, kvdtype, tp, pp, dp, mfu, mbu):
-        def none_if_any(v):
-            return None if v in (NONE, None) else v
-        return {"arch": none_if_any(arch), "gpu": none_if_any(gpu),
-                "wdtype": none_if_any(wdtype), "kvdtype": none_if_any(kvdtype),
-                "tp": none_if_any(tp), "pp": none_if_any(pp), "dp": none_if_any(dp),
-                "mfu": none_if_any(mfu), "mbu": none_if_any(mbu)}
-
-    @app.callback(
         Output("at-explorer-conv-table", "data"),
         Output("at-deep-conv-table", "data"),
         Input("at-explorer-filter-store", "data"),
-        Input("at-explorer-config-store", "data"),
         prevent_initial_call=True,
     )
-    def table_data(filters, config):
+    def table_data(filters):
         """ONE conversation list served to both viewports (Explorer and
         Deep-dive) with identical rows in identical order, so row indices and
         the shared selection can never diverge."""
@@ -216,8 +192,6 @@ def register_explorer_callbacks(app) -> None:
             if skipped:
                 logger.warning("%s: %d conversations without main turns skipped",
                                slug, skipped)
-            arch_key, gpu_key, cfg = resolve_assumptions(config)
-            rows = augment_rows_with_compute(rows, pool, arch_key, gpu_key, cfg)
             return rows, rows
         except Exception:
             logger.exception("explorer table data failed")
