@@ -64,7 +64,7 @@ Y_MEASURES = {
              "token × bytes per entry).",
         getter=lambda p: _clamp1(p["kv_bytes"])),
     "new_input_tokens": dict(
-        label="new input (uncached tokens, user/tool/agent)", scale="log",
+        label="uncached input (tokens, user/tool/agent)", scale="log",
         cumulative=False,
         info="Uncached input tokens — new text (user message, tool results, "
              "agent hand-offs) not already served from the prompt cache; this "

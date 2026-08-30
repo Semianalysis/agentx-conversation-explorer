@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 # These dropdowns are two views of ONE value, synced both ways.
 _DATASET_DDS = ("at-explorer-dataset-dd", "at-corr-dataset-dd")
 
+# Startup default: the FULL weka traces (user 2026-08-29: the 256k-limit
+# variant is not very useful as a default). Falls back to the first cached
+# dataset when the preferred one isn't on disk.
+DEFAULT_DATASET_SLUG = "cc-traces-weka-062126"
+
 
 def cached_dataset_options() -> list[dict]:
     """Datasets with at least one cached conversation (dropdown options for
@@ -147,8 +152,13 @@ def register_explorer_callbacks(app) -> None:
     def dataset_options(_tab, _cache, current):
         try:
             opts = cached_dataset_options()
-            value = current if current in {o["value"] for o in opts} else (
-                opts[0]["value"] if opts else None)
+            slugs = {o["value"] for o in opts}
+            if current in slugs:
+                value = current
+            elif DEFAULT_DATASET_SLUG in slugs:
+                value = DEFAULT_DATASET_SLUG
+            else:
+                value = opts[0]["value"] if opts else None
             return opts, value
         except Exception:
             logger.exception("explorer dataset options failed")

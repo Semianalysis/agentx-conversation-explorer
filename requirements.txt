@@ -1,4 +1,6 @@
-dash>=3.1
-plotly>=6.0
-requests>=2.31
-pytest>=8.0
+# Pinned to the exact versions the app is developed and tested against.
+# (Exact, aged pins also satisfy the org's supply-chain cooldown guard —
+# loose ranges resolve to just-published versions and get blocked.)
+dash==3.1.1
+plotly==6.2.0
+requests==2.32.5
