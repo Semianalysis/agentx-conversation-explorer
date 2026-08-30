@@ -1,12 +1,12 @@
 """Explorer tab layout: growth-curve chart (most of the screen) + scrollable,
 sortable, filterable conversation list.
 
-Serving assumptions (GPU, quantizations, TP/PP/DP, MFU, MBU, architecture) are
-compact dropdowns in a TOP BAR, all defaulting to 'any' (= the documented
-default); their resolved values appear as columns in the list, and the list —
-via column sorting (click; clicks stack for 2nd/3rd-order sort) and the native
-per-column filter row (supports ranges: >100000, <=2) — is the main filtering
-surface. The left column keeps only dataset + selection controls.
+The list — via column sorting (click; clicks stack for 2nd/3rd-order sort)
+and the native per-column filter row (supports ranges: >100000, <=2) — is the
+main filtering surface; it shows TRACE FACTS only (hardware cost estimates
+were removed 2026-08-30: proprietary-model weights/data-movement guessing is
+left to simulation via the Deep-dive sweep export). The left column keeps
+only dataset + selection controls.
 
 Cross-tab stores live HERE (all tabs stay mounted, see app.py):
   at-explorer-filter-store     {'slug'}
@@ -19,7 +19,6 @@ from __future__ import annotations
 from dash import dash_table, dcc, html
 
 from modules import controls
-from modules.arch import ARCHITECTURES, DEFAULT_ASSUMPTIONS, GPUS
 from modules.controls import NONE
 from modules.theme import F_SMALL, GRAPH_CONFIG, MONO
 
@@ -39,14 +38,6 @@ TABLE_COLUMNS = [
     {"name": "avg out", "id": "avg_out", "type": "numeric"},
     {"name": "max out", "id": "max_out", "type": "numeric", "format": _GROUPED},
     {"name": "hours", "id": "duration_h", "type": "numeric"},
-    {"name": "GPU", "id": "gpu", "type": "text"},
-    {"name": "Wq", "id": "wq", "type": "text"},
-    {"name": "KVq", "id": "kvq", "type": "text"},
-    {"name": "TP", "id": "tp", "type": "numeric"},
-    {"name": "PP", "id": "pp", "type": "numeric"},
-    {"name": "DP", "id": "dp", "type": "numeric"},
-    {"name": "prefill GPUs", "id": "prefill_gpus", "type": "numeric"},
-    {"name": "decode GPUs", "id": "decode_gpus", "type": "numeric"},
 ]
 
 # Header hover-help for the shared conversation list (both viewports). Keyed
@@ -73,50 +64,11 @@ COLUMN_TOOLTIPS = {
     "duration_h": "Wall-clock hours from first request start to last request "
                   "end — includes idle time when nothing ran (typically most "
                   "of the span).",
-    "gpu": "GPU type resolved from the assumption bar ('any' → default). Not "
-           "recorded in the traces — a serving assumption.",
-    "wq": "Weight precision assumed for the implied-compute math "
-          "(bf16 = 2 bytes/param, fp8 = 1).",
-    "kvq": "KV-cache precision assumed (bf16 = 2 bytes/entry, fp8 = 1).",
-    "tp": "Tensor-parallel degree — how many GPUs split each layer's matmuls.",
-    "pp": "Pipeline-parallel degree — how many sequential GPU stages the "
-          "layers are split into.",
-    "dp": "Data-parallel degree — independent model replicas serving "
-          "different requests.",
-    "prefill_gpus": "Sustained GPU count implied by the trace's prefill work: "
-                    "implied prefill GPU-seconds ÷ the conversation's "
-                    "wall-clock span. Empty when the span is 0.",
-    "decode_gpus": "Sustained GPU count implied by the trace's decode work: "
-                   "implied decode GPU-seconds ÷ wall-clock span. Empty when "
-                   "the span is 0.",
 }
 
 # Kwargs shared by both DataTables so header help can never diverge.
 TABLE_TOOLTIP_KWARGS = dict(tooltip_header=COLUMN_TOOLTIPS, tooltip_delay=400,
                             tooltip_duration=None)
-
-
-def _any_dd(id_: str, options: list[dict], width: str = "150px") -> dcc.Dropdown:
-    return dcc.Dropdown(
-        id=id_, clearable=False, value=NONE,
-        options=[{"label": "any", "value": NONE}] + options,
-        style={"fontSize": "12px", "width": width})
-
-
-def _bar_item(label: str, component, info: str | None = None) -> html.Div:
-    label_children: list = [label]
-    if info:
-        label_children.append(controls.info(info))
-    return html.Div(
-        style={"display": "flex", "flexDirection": "column", "gap": "1px"},
-        children=[html.Span(label_children,
-                            style={"fontSize": "10px", "color": "#666",
-                                   "fontWeight": "600"}),
-                  component])
-
-
-def _num_options(values: list[int]) -> list[dict]:
-    return [{"label": str(v), "value": v} for v in values]
 
 
 def layout() -> html.Div:
@@ -175,86 +127,16 @@ def layout() -> html.Div:
                  "the column filter row (e.g. >100000 under 'final ctx'); click "
                  "column headers to sort — clicks stack for 2nd/3rd-order sorts.",
                  style={"fontSize": "11px", "color": "#999", "marginTop": "10px"}),
-        html.Div("Serving assumptions live in the bar above the chart; 'any' means "
-                 "the documented default. GPU counts in the list are the sustained "
-                 "single-GPU-equivalents implied by each trace under those "
-                 "assumptions.",
+        html.Div("The list shows trace facts only (tokens, turns, timing). "
+                 "Hardware cost estimates are deliberately not shown — use "
+                 "the Deep-dive sweep export and simulate.",
                  style={"fontSize": "11px", "color": "#999", "marginTop": "10px"}),
     ])
-
-    assumption_bar = html.Div(
-        style={"display": "flex", "gap": "10px", "alignItems": "flex-end",
-               "padding": "6px 10px", "borderBottom": "1px solid #eee",
-               "flexWrap": "wrap", "flex": "0 0 auto"},
-        children=[
-            _bar_item("Architecture", _any_dd(
-                "at-explorer-arch-dd",
-                [{"label": a["label"], "value": k} for k, a in ARCHITECTURES.items()],
-                width="240px"),
-                info="Model architecture used to turn trace token counts into "
-                     "implied FLOPs, KV-cache bytes, and network traffic. Not "
-                     "recorded in the traces — an assumption you pick. 'any' = "
-                     f"{ARCHITECTURES[DEFAULT_ASSUMPTIONS['arch']]['label']}."),
-            _bar_item("GPU", _any_dd(
-                "at-explorer-gpu-dd",
-                [{"label": g["label"], "value": k} for k, g in GPUS.items()],
-                width="120px"),
-                info="GPU whose spec-sheet peak FLOPs and HBM bandwidth "
-                     "convert the implied work into GPU-seconds and GPU "
-                     "counts. 'any' = "
-                     f"{GPUS[DEFAULT_ASSUMPTIONS['gpu']]['label']}."),
-            _bar_item("Weights q", _any_dd(
-                "at-explorer-wdtype-dd",
-                [{"label": d, "value": d} for d in ("bf16", "fp8")], width="90px"),
-                info="Numeric precision of the model weights (bf16 = 2 bytes/"
-                     "param, fp8 = 1). Sets weight-read bytes and which peak-"
-                     "FLOPs spec applies. 'any' = "
-                     f"{DEFAULT_ASSUMPTIONS['wdtype']}."),
-            _bar_item("KV q", _any_dd(
-                "at-explorer-kvdtype-dd",
-                [{"label": d, "value": d} for d in ("bf16", "fp8")], width="90px"),
-                info="Numeric precision of the KV cache (bf16 = 2 bytes/entry, "
-                     "fp8 = 1). Sets KV read/write bytes and footprint. 'any' "
-                     f"= {DEFAULT_ASSUMPTIONS['kvdtype']}."),
-            _bar_item("TP", _any_dd("at-explorer-tp-dd",
-                                    _num_options([1, 2, 4, 8, 16, 32]), width="72px"),
-                      info="Tensor parallelism — GPUs splitting each layer's "
-                           "matmuls; adds all-reduce traffic per token. 'any' "
-                           f"= {DEFAULT_ASSUMPTIONS['tp']}."),
-            _bar_item("PP", _any_dd("at-explorer-pp-dd",
-                                    _num_options([1, 2, 4, 8]), width="72px"),
-                      info="Pipeline parallelism — layers split into "
-                           "sequential GPU stages; adds activation traffic at "
-                           "each stage boundary. 'any' = "
-                           f"{DEFAULT_ASSUMPTIONS['pp']}."),
-            _bar_item("DP", _any_dd("at-explorer-dp-dd",
-                                    _num_options([1, 2, 4, 8, 16, 32]), width="72px"),
-                      info="Data parallelism — independent model replicas "
-                           "serving different requests. No per-request "
-                           "traffic; carried for cluster sizing. 'any' = "
-                           f"{DEFAULT_ASSUMPTIONS['dp']}."),
-            _bar_item("MFU %", _any_dd("at-explorer-mfu-dd",
-                                       _num_options([20, 30, 40, 50, 60, 70, 80]),
-                                       width="80px"),
-                      info="Model FLOPs Utilization — fraction of the GPU's "
-                           "peak tensor FLOPs actually sustained; divides "
-                           "into implied compute time. 'any' = "
-                           f"{DEFAULT_ASSUMPTIONS['mfu']}%."),
-            _bar_item("MBU %", _any_dd("at-explorer-mbu-dd",
-                                       _num_options([30, 40, 50, 60, 70, 80, 90]),
-                                       width="80px"),
-                      info="Memory Bandwidth Utilization — fraction of peak "
-                           "HBM bandwidth actually sustained; divides into "
-                           "implied memory-movement time. 'any' = "
-                           f"{DEFAULT_ASSUMPTIONS['mbu']}%."),
-        ],
-    )
 
     center = html.Div(
         style={"flex": "1 1 0%", "minWidth": "0", "display": "flex",
                "flexDirection": "column", "overflow": "hidden"},
         children=[
-            assumption_bar,
             dcc.Graph(id="at-explorer-growth-graph", config=GRAPH_CONFIG,
                       style={"flex": "1 1 auto", "minHeight": "0"}),
             html.Div(

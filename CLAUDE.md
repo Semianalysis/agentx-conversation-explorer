@@ -89,7 +89,15 @@ Independent project — it imitates the InferenceX Explorer tab of
   REMOVED from the right panel at the user's request (the table's sustained-GPU
   columns remain). Dataset + assumptions come from Explorer ("any" → DEFAULT_ASSUMPTIONS
   in arch.py).
-- Purpose: explore compute activity and configuration potential implied by real agent traces.
+- Purpose: explore the shape of real agent traces (tokens, turns, timing).
+- HARDWARE GUESSING REMOVED (user, 2026-08-30, bld 33): no FLOPs, byte, memory-
+  movement, network, or implied-GPU numbers anywhere in the UI — we don't know
+  proprietary models' weights/token or data movement. Deep-dive keeps ONLY the
+  trace-facts scope card; measures are token/time only; the Explorer assumption
+  bar and GPU/Wq/KVq/TP/PP/DP + prefill/decode-GPU columns are gone. Cost
+  questions are answered by 'Export sweep points (JSON)' + external simulation
+  (model_charts). arch.py retains the math internally (enrichment plumbing) but
+  nothing user-facing reads it; older tab descriptions above predate this.
 
 Data-source findings and open questions: `docs/data-source-notes.md`.
 Interaction/layout patterns to imitate: `docs/ix-explorer-reference.md`.

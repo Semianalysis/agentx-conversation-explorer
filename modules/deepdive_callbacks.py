@@ -19,8 +19,8 @@ from modules.explorer_data import build_conversation_table
 from modules.figures import empty_figure
 from modules.measures import (ALL_MEASURES, X_MEASURES, Y_MEASURES, axis_units,
                               measure_series, shared_axis_range, zoom_window)
-from modules.theme import (F_SMALL, MONO, ROLE_COLORS, color_for, fmt_bytes,
-                           fmt_count, fmt_flops)
+from modules.theme import (F_SMALL, MONO, ROLE_COLORS, color_for,
+                           fmt_count)
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +429,6 @@ def _interval_inspector(per_request: list[dict], axes: dict,
                       info_text="The clicked interval holds no requests.")]
 
     n = len(rows)
-    mean_flops = sum(p["flops"] for p in rows) / n
     kids = [html.Div(
         [f"Interval — {ALL_MEASURES[x_key]['label']} {label}, "
          f"{n:,} requests, "
@@ -440,14 +439,8 @@ def _interval_inspector(per_request: list[dict], axes: dict,
                        "running totals are meaningless inside one interval). "
                        "Double-click a chart to dismiss.")],
         style={"fontWeight": "600", "fontSize": F_SMALL, "display": "flex",
-               "alignItems": "center", "marginBottom": "4px"}),
-        html.Div(f"mean turn FLOPs: {fmt_flops(mean_flops)}",
-                 title="Average implied FLOPs (prefill + decode) per request "
-                       "in this interval, under the current assumptions.",
-                 style={"fontFamily": MONO, "fontSize": "11px",
-                        "color": "#555", "marginBottom": "2px"})]
-    _PER_TURN = {"cumulative_flops": "current_flops",
-                 "cumulative_output_tokens": "new_output_tokens"}
+               "alignItems": "center", "marginBottom": "4px"})]
+    _PER_TURN = {"cumulative_output_tokens": "new_output_tokens"}
     for slot in _SLOTS:
         ym = Y_MEASURES[_PER_TURN.get(axes[slot], axes[slot])]
         values = [ym["getter"](p) for p in rows]
@@ -498,41 +491,7 @@ def _summary_panel(arch, cfg, agg, all_selected: bool) -> list:
             ("… uncached", fmt_count(totals["uncached_tokens"]),
              "New input tokens actually prefilled."),
             ("Output tokens", fmt_count(totals["out_tokens"])),
-        ], info_text="Token counts come straight from the traces; everything "
-                     "below is IMPLIED from them under the assumption bar's "
-                     "settings on the Explorer tab."),
-        _card(f"Implied compute — {arch['label']}", [
-            ("Prefill FLOPs", fmt_flops(totals["prefill_flops"]),
-             "Processing new input: linear layers over uncached tokens plus "
-             "attention against each request's context."),
-            ("Decode FLOPs", fmt_flops(totals["decode_flops"]),
-             "Generating output tokens, one forward pass per token."),
-            ("Total FLOPs", fmt_flops(totals["prefill_flops"] + totals["decode_flops"])),
-        ], info_text="FLOPs this architecture WOULD spend serving these "
-                     "traces — computed from the token counts, not measured "
-                     "on real hardware."),
-        _card(f"Implied memory movement (HBM, kv {cfg['dtype_kv']})", [
-            ("Prefill", fmt_bytes(totals["prefill_hbm_bytes"])),
-            ("Decode", fmt_bytes(totals["decode_hbm_bytes"]),
-             "Decode re-reads the weights and the growing KV cache for every "
-             "generated token — usually the bandwidth-bound phase."),
-            ("Total", fmt_bytes(totals["prefill_hbm_bytes"] + totals["decode_hbm_bytes"])),
-            ("Peak KV footprint (one conv)", fmt_bytes(totals["peak_kv_bytes"]),
-             "Largest single-request context KV under these assumptions — "
-             "what one replica must hold in HBM at that moment."),
-        ], info_text="Bytes moved through GPU memory (HBM): weight reads and "
-                     "KV-cache reads/writes implied by the token counts."),
-        _card(f"Implied network (TP={cfg['tp']}, PP={cfg.get('pp', 1)}, "
-              f"DP={cfg.get('dp', 1)})", [
-            ("TP all-reduce", fmt_bytes(totals["net_tp_bytes"]),
-             "Tensor parallelism synchronizes every layer's partial results "
-             "across the TP group — twice per layer per token."),
-            ("EP all-to-all", fmt_bytes(totals["net_ep_bytes"]),
-             "MoE expert dispatch and combine traffic (zero for dense "
-             "architectures)."),
-            ("PP stage traffic", fmt_bytes(totals["net_pp_bytes"]),
-             "Activations crossing each pipeline-stage boundary (zero when "
-             "PP=1)."),
-        ], info_text="Interconnect traffic implied by the parallelism "
-                     "assumptions from the Explorer assumption bar."),
+        ], info_text="Token counts and timing come straight from the "
+                     "traces. Hardware cost estimates are deliberately NOT "
+                     "shown — export sweep points and simulate instead."),
     ]

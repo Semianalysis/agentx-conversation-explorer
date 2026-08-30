@@ -59,12 +59,6 @@ Y_MEASURES = {
              "prefix-cache hit), distinct from the uncached input the turn "
              "then prefills. cached + uncached = the total context attended.",
         getter=lambda p: _clamp1(p["cached_tokens"])),
-    "context_kv_bytes": dict(
-        label="cached KV at turn start (bytes)", scale="log", cumulative=False,
-        info="Bytes the cached prefix occupies in the KV cache at the turn's "
-             "start, under the selected architecture and KV precision "
-             "(layers × KV entries per token × bytes per entry).",
-        getter=lambda p: _clamp1(p["kv_bytes"])),
     "new_input_tokens": dict(
         label="uncached input (tokens, user/tool/agent)", scale="log",
         cumulative=False,
@@ -83,17 +77,6 @@ Y_MEASURES = {
              "and including this request. With few conversations selected, "
              "drawn as one line per conversation.",
         getter=lambda p: _clamp1(p["cum_out"])),
-    "cumulative_flops": dict(
-        label="cumulative FLOPs (per conv)", scale="log", cumulative=True,
-        info="Running total of implied FLOPs (prefill + decode) within the "
-             "conversation under the selected architecture — implied by token "
-             "counts, not measured.",
-        getter=lambda p: _clamp1(p["cum_flops"])),
-    "current_flops": dict(
-        label="turn FLOPs", scale="log", cumulative=False,
-        info="Implied FLOPs of this single request (prefill + decode) under "
-             "the selected architecture.",
-        getter=lambda p: _clamp1(p["flops"])),
 }
 
 ALL_MEASURES = {**X_MEASURES, **Y_MEASURES}

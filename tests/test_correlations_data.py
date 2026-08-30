@@ -19,13 +19,16 @@ class TestMeasureRegistry(unittest.TestCase):
                          {"y1": "kv_cache_tokens", "y2": "new_input",
                           "y3": "decode_output"})
         for key in ("turn_number", "cumulative_time", "busy_time",
-                    "kv_cache_tokens", "kv_cache_bytes", "new_input",
-                    "decode_output", "turn_flops"):
+                    "kv_cache_tokens", "new_input", "decode_output"):
             self.assertIn(key, MEASURES)
+        # hardware guessing removed 2026-08-30: no FLOPs / byte measures
+        self.assertNotIn("turn_flops", MEASURES)
+        self.assertNotIn("kv_cache_bytes", MEASURES)
         for key, m in MEASURES.items():
             self.assertTrue(m.get("info", "").strip(), f"{key} missing info")
         self.assertEqual(MEASURES["new_input"]["label"],
                          "uncached input (tokens)")
+
 
     def test_getters_read_enriched_rows(self):
         row = {"seq": 7, "start_s": 100.0, "busy_s": 40.0, "kv_bytes": 5e9,
@@ -34,7 +37,6 @@ class TestMeasureRegistry(unittest.TestCase):
         self.assertEqual(measure_values([row], "kv_cache_tokens"), [1877])
         self.assertEqual(measure_values([row], "turn_number"), [7])
         self.assertEqual(measure_values([row], "busy_time"), [40.0])
-        self.assertEqual(measure_values([row], "turn_flops"), [1e12])
         with self.assertRaises(KeyError):
             measure_values([{}], "kv_cache_bites")
 
