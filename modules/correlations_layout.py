@@ -126,7 +126,8 @@ def layout() -> html.Div:
         controls.label("Turn range (zoom)",
                        info_text="Restrict every chart to requests whose "
                                  "turn # (sequence in conversation) lies in "
-                                 "[first, last]. Leave empty for open ends. "
+                                 "[first, last]. Leave empty for open ends; "
+                                 "press Enter (or click away) to apply. "
                                  "Changing it re-bins, so selections reset."),
         html.Div(style={"display": "flex", "gap": "6px"}, children=[
             dcc.Input(id="at-corr-turnlo-input", type="number",

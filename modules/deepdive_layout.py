@@ -195,6 +195,19 @@ def layout() -> html.Div:
             html.Div("Grouped mode: at each x, conversations that have ended "
                      "drop out of mean/min/max — never padded with a default.",
                      style={"fontSize": "10px", "color": "#aaa", "marginTop": "2px"}),
+            html.Button("Export sweep points (JSON)",
+                        id="at-deep-sweep-btn", n_clicks=0,
+                        title="Sample the mean-of-conversations timeline into "
+                              "10 evenly spaced points (from zero to the last "
+                              "x where at least 2 conversations were sampled) "
+                              "and download them as JSON: average context "
+                              "tokens, new ISL, and expected OSL per point - "
+                              "no model or GPU, so model_charts can sweep "
+                              "those. Uses the checked conversations and the "
+                              "current x measure.",
+                        style={"fontSize": "11px", "marginTop": "8px",
+                               "padding": "3px 8px"}),
+            dcc.Download(id="at-deep-sweep-dl"),
             html.Div(["Magnifier: click a point to zoom that chart 5× around "
                       "it (the other charts gray points outside the window); "
                       "click a point on the magnified chart to inspect it in "

@@ -76,6 +76,50 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
             "wall_s_sum": wall_s_sum, "n_convs": len(conv_ids)}
 
 
+def sweep_points(per_request: list[dict], x_key: str,
+                 n_points: int = 10) -> dict:
+    """Sample the grouped mean-of-conversations timeline into simulator sweep
+    points: n_points evenly spaced x positions from ZERO to the last x at
+    which at least 2 conversations were still sampled (2nd-largest per-conv
+    max). Each point averages context tokens / new ISL / expected OSL over
+    the requests in its half-step window — model and GPU deliberately absent
+    (the simulation sweeps those). Windows with no requests are SKIPPED,
+    never fabricated. Raises on unsupported x measures or < 2 conversations.
+    """
+    raw_field = {"turn_number": "seq", "cumulative_time": "start_s",
+                 "busy_time": "busy_s"}
+    if x_key not in raw_field:
+        raise ValueError(f"sweep_points needs a time/turn x measure, "
+                         f"not {x_key!r}")
+    f = raw_field[x_key]
+    conv_max: dict[str, float] = {}
+    for p in per_request:
+        conv_max[p["cid"]] = max(conv_max.get(p["cid"], 0.0), p[f])
+    if len(conv_max) < 2:
+        raise ValueError("sweep_points needs at least 2 conversations")
+    t_last = sorted(conv_max.values())[-2]
+    if t_last <= 0:
+        raise ValueError(f"degenerate timeline: t_last={t_last}")
+    step = t_last / (n_points - 1)
+    points = []
+    for i in range(n_points):
+        t = i * step
+        rows = [p for p in per_request if t - step / 2 <= p[f] < t + step / 2]
+        if not rows:
+            continue
+        n = len(rows)
+        points.append({
+            x_key: round(t, 3),
+            "context_tokens": round(sum(p["in_tokens"] for p in rows) / n),
+            "new_isl_tokens": round(sum(p["uncached_tokens"] for p in rows) / n),
+            "expected_osl_tokens": round(sum(p["out_tokens"] for p in rows) / n),
+            "n_requests": n,
+            "n_conversations": len({p["cid"] for p in rows}),
+        })
+    return {"x_measure": x_key, "t_last": t_last, "window": step,
+            "n_conversations_total": len(conv_max), "points": points}
+
+
 def zoom_member_uids(per_request: list[dict], x_key: str, y_key: str,
                      window_x: list[float], window_y: list[float],
                      x_scale: str) -> set[str]:
