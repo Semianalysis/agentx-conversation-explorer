@@ -68,7 +68,8 @@ class TestMeasureRegistry(unittest.TestCase):
         kv_per_tok = (self.arch["n_layers"]
                       * self.arch["kv_entries_per_token_per_layer"]
                       * DTYPE_BYTES[self.cfg["dtype_kv"]])
-        self.assertEqual(p["kv_bytes"], p["in_tokens"] * kv_per_tok)
+        # cached-at-turn-start semantics (user 2026-08-30), NOT total input
+        self.assertEqual(p["kv_bytes"], p["cached_tokens"] * kv_per_tok)
         self.assertEqual(measure_series([p], "context_kv_bytes")[0], p["kv_bytes"])
 
     def test_unknown_measure_raises(self):
@@ -188,9 +189,9 @@ class TestZoomHelpers(unittest.TestCase):
     def test_zoom_member_uids(self):
         from modules.deepdive_data import zoom_member_uids
         rows = [
-            {"uid": "a", "seq": 5, "in_tokens": 100},    # inside both
-            {"uid": "b", "seq": 50, "in_tokens": 100},   # x outside
-            {"uid": "c", "seq": 5, "in_tokens": 10_000}, # y outside
+            {"uid": "a", "seq": 5, "cached_tokens": 100},     # inside both
+            {"uid": "b", "seq": 50, "cached_tokens": 100},    # x outside
+            {"uid": "c", "seq": 5, "cached_tokens": 10_000},  # y outside
         ]
         members = zoom_member_uids(rows, "turn_number", "context_tokens",
                                    window_x=[0.0, 10.0],        # linear x
@@ -255,10 +256,11 @@ class TestGroupedSeries(unittest.TestCase):
                                 "context_tokens")
         self.assertEqual(g["xs"], [1, 2])
         self.assertEqual(g["n_alive"], [2, 1])       # cB dropped out at turn 2
-        self.assertAlmostEqual(g["mean"][0], 1500.0)  # (1000+2000)/2
-        self.assertAlmostEqual(g["mean"][1], 3000.0)  # only cA — no padding
-        self.assertEqual((g["lo"][0], g["hi"][0]), (1000.0, 2000.0))
-        self.assertEqual((g["lo"][1], g["hi"][1]), (3000.0, 3000.0))
+        # context_tokens = CACHED at start = in_t - unc(100) since 2026-08-30
+        self.assertAlmostEqual(g["mean"][0], 1400.0)  # (900+1900)/2
+        self.assertAlmostEqual(g["mean"][1], 2900.0)  # only cA — no padding
+        self.assertEqual((g["lo"][0], g["hi"][0]), (900.0, 1900.0))
+        self.assertEqual((g["lo"][1], g["hi"][1]), (2900.0, 2900.0))
 
     def test_envelope_brackets_mean(self):
         g = self.grouped_series(self.agg["per_request"], "cumulative_time",

@@ -23,8 +23,8 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
     per_request rows are ordered by (ordinal, start_s) and enriched for the
     measure registry: 'ord' (conversation ordinal), 'cid', 'seq' (1-based
     request sequence within the conversation, time order), 'cum_flops'
-    (running FLOPs within the conversation), 'kv_bytes' (context KV-cache
-    bytes under the assumptions), 'busy_s' (ACTIVE seconds elapsed at the
+    (running FLOPs within the conversation), 'kv_bytes' (KV-cache bytes of the CACHED
+    prefix at the turn's start, under the assumptions), 'busy_s' (ACTIVE seconds elapsed at the
     request's start: the measure of the union of all earlier [start, end]
     request intervals in the conversation — idle gaps contribute nothing).
 
@@ -69,7 +69,9 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
                 **p, "ord": ord_, "cid": cid, "seq": seq,
                 "cum_flops": cum_flops,
                 "cum_out": cum_out,
-                "kv_bytes": p["in_tokens"] * kv_bytes_per_token,
+                # KV held at the turn's START: the cached prefix only,
+                # distinct from the uncached input the turn then prefills
+                "kv_bytes": p["cached_tokens"] * kv_bytes_per_token,
                 "busy_s": busy_s,
             })
     return {"totals": totals, "per_request": per_request,

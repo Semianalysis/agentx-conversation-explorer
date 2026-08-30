@@ -53,15 +53,17 @@ X_MEASURES = {
 
 Y_MEASURES = {
     "context_tokens": dict(
-        label="context size (tokens)", scale="log", cumulative=False,
-        info="Total input tokens of the request (cached + new) — the context "
-             "the model attends over.",
-        getter=lambda p: _clamp1(p["in_tokens"])),
+        label="cached context at turn start (tokens)", scale="log",
+        cumulative=False,
+        info="Input tokens ALREADY in the KV cache when the turn starts (the "
+             "prefix-cache hit), distinct from the uncached input the turn "
+             "then prefills. cached + uncached = the total context attended.",
+        getter=lambda p: _clamp1(p["cached_tokens"])),
     "context_kv_bytes": dict(
-        label="context KV-cache size (bytes)", scale="log", cumulative=False,
-        info="Bytes of KV cache the request's context occupies under the "
-             "selected architecture and KV precision (layers × KV entries per "
-             "token × bytes per entry).",
+        label="cached KV at turn start (bytes)", scale="log", cumulative=False,
+        info="Bytes the cached prefix occupies in the KV cache at the turn's "
+             "start, under the selected architecture and KV precision "
+             "(layers × KV entries per token × bytes per entry).",
         getter=lambda p: _clamp1(p["kv_bytes"])),
     "new_input_tokens": dict(
         label="uncached input (tokens, user/tool/agent)", scale="log",

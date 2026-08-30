@@ -414,9 +414,10 @@ def _point_inspector(p: dict, arch: dict, cfg: dict) -> list:
              "context."),
             ("OSL (decode)", fmt_count(p["out_tokens"]),
              "Output sequence length — tokens generated."),
-            ("KV cache", f"{fmt_bytes(p['kv_bytes'])} "
-                         f"({fmt_count(p['in_tokens'])} tok)",
-             "Context KV footprint under the KV precision assumption."),
+            ("Cached KV at start", f"{fmt_bytes(p['kv_bytes'])} "
+                                   f"({fmt_count(p['cached_tokens'])} tok)",
+             "KV already held when the turn starts - the cached prefix, "
+             "under the KV precision assumption."),
             ("Prefill FLOPs", fmt_flops(c["prefill_flops"])),
             ("Decode FLOPs", fmt_flops(c["decode_flops"])),
             ("Turn FLOPs", fmt_flops(p["flops"])),

@@ -50,16 +50,17 @@ MEASURES = {
              "idle gaps compressed out).",
         getter=lambda p: p["busy_s"]),
     "kv_cache_tokens": dict(
-        label="KV cache (tokens)",
-        info="Context tokens held in the KV cache - the request's total "
-             "input (cached + new). Architecture-independent; the byte size "
-             "is this times KV bytes/token under the assumptions.",
-        getter=lambda p: p["in_tokens"]),
+        label="cached KV at turn start (tokens)",
+        info="Input tokens ALREADY in the KV cache when the turn starts (the "
+             "prefix-cache hit), distinct from the uncached input the turn "
+             "then prefills. Architecture-independent; the byte size is this "
+             "times KV bytes/token under the assumptions.",
+        getter=lambda p: p["cached_tokens"]),
     "kv_cache_bytes": dict(
-        label="KV cache size (bytes)",
-        info="KV-cache bytes of the request's context under the selected "
-             "architecture and KV precision (from the Explorer assumption "
-             "bar).",
+        label="cached KV at turn start (bytes)",
+        info="Bytes the cached prefix occupies in the KV cache at the turn's "
+             "start, under the selected architecture and KV precision (from "
+             "the Explorer assumption bar).",
         getter=lambda p: p["kv_bytes"]),
     "new_input": dict(
         label="uncached input (tokens)",
