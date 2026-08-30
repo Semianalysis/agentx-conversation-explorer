@@ -62,7 +62,6 @@ def multi_histogram_figure(
     x_title: str,
     y_title: str,
     log_x: bool,
-    log_y: bool,
     own_marks: list[tuple[list[int], str, str]],
     overlays: list[tuple[list[float], str, str]],
     stat_values: list[float] | None = None,
@@ -135,8 +134,7 @@ def multi_histogram_figure(
     ))
 
     _apply_index_ticks(fig, edges, log_x, x_title)
-    fig.update_yaxes(title_text=y_title, title_font_size=11,
-                     type=("log" if log_y else "linear"))
+    fig.update_yaxes(title_text=y_title, title_font_size=11)
     fig.update_layout(**theme.base_layout(
         title=dict(text=title, font=dict(size=13)),
         autosize=True,

@@ -39,12 +39,13 @@ def register_deepdive_callbacks(app) -> None:
         Input("at-deep-y3-radio", "value"),
         Input("at-deep-groupopts-cl", "value"),
         Input("at-deep-xscale-radio", "value"),
+        Input("at-deep-envelope-radio", "value"),
     )
-    def coalesce_axes(x, y1, y2, y3, groupopts, xscale):
+    def coalesce_axes(x, y1, y2, y3, groupopts, xscale, envelope):
         groupopts = groupopts or []
         return {"x": x, "y1": y1, "y2": y2, "y3": y3,
                 "grouped": "grouped" in groupopts,
-                "envelope": "envelope" in groupopts,
+                "envelope": envelope or "p1090",
                 "xscale": xscale or "auto"}
 
     @app.callback(
@@ -92,6 +93,12 @@ def register_deepdive_callbacks(app) -> None:
             if not pts:
                 raise PreventUpdate
             pt = pts[0]
+            axes = args[6] or {}
+            if axes.get("grouped"):
+                # grouped mode has no magnifier; a click inspects the x
+                # interval (the mean line only has points at occupied bins,
+                # so idle cumulative-time stretches are unclickable)
+                return None, {"interval_x": pt["x"]}, *reset
             if zoom and zoom.get("chart") == slot:
                 uid = pt.get("customdata")
                 if not uid:  # grouped/envelope lines carry no request uid
@@ -154,7 +161,10 @@ def register_deepdive_callbacks(app) -> None:
                 measure_series(agg["per_request"], axes["x"]), x_scale_eff)
 
             # magnifier: window on the zoomed chart, member set for graying
+            # (no magnifier in grouped mode - clicks inspect intervals there)
             zoom = zoom if zoom and zoom.get("chart") in _SLOTS else None
+            if axes.get("grouped"):
+                zoom = None
             window_x = window_y = None
             member_uids: set | None = None
             if zoom:
@@ -178,7 +188,7 @@ def register_deepdive_callbacks(app) -> None:
                     agg["per_request"], axes["x"], axes[slot],
                     agg["n_convs"],
                     grouped=axes.get("grouped", False),
-                    envelope=axes.get("envelope", False),
+                    envelope=axes.get("envelope", "p1090"),
                     x_scale=x_scale_eff,
                     member_uids=(None if (is_zoomed or member_uids is None)
                                  else member_uids),
@@ -196,6 +206,9 @@ def register_deepdive_callbacks(app) -> None:
                           if r["uid"] == point["uid"]), None)
                 if p is not None:
                     panel = _point_inspector(p, arch, cfg) + panel
+            elif axes.get("grouped") and (point or {}).get("interval_x") is not None:
+                panel = _interval_inspector(
+                    agg["per_request"], axes, point["interval_x"]) + panel
             return (*figs, panel)
         except PreventUpdate:
             raise
@@ -205,7 +218,7 @@ def register_deepdive_callbacks(app) -> None:
 
 
 def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
-                    grouped: bool = False, envelope: bool = False,
+                    grouped: bool = False, envelope: str = "p1090",
                     x_scale: str | None = None,
                     member_uids: set | None = None,
                     magnified: bool = False) -> go.Figure:
@@ -223,9 +236,12 @@ def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
     title = ym["label"] + (" — magnified 5×" if magnified else "")
     if grouped and x_key != "conv_number" and n_convs > 1:
         g = grouped_series(per_req, x_key, y_key)
-        if envelope:
-            for name, ys in (("min of any conv", g["lo"]),
-                             ("max of any conv", g["hi"])):
+        band = {"minmax": (("min of any conv", g["lo"]),
+                           ("max of any conv", g["hi"])),
+                "p1090": (("p10 of convs", g["p10"]),
+                          ("p90 of convs", g["p90"]))}.get(envelope, ())
+        if band:
+            for name, ys in band:
                 fig.add_trace(go.Scattergl(
                     x=g["xs"], y=ys, mode="lines",
                     line=dict(color="#888", width=1.4, dash="dot"),
@@ -388,6 +404,82 @@ def _point_inspector(p: dict, arch: dict, cfg: dict) -> list:
                      "all global assumptions from the Explorer bar, applied "
                      "identically to every request."),
     ]
+
+
+def _interval_inspector(per_request: list[dict], axes: dict,
+                        interval_x: float) -> list:
+    """Right-column cards for one clicked x interval in grouped mode: which
+    rows fall in it, and a mini histogram of each chart's y measure over
+    exactly those rows. x=turn # -> the interval IS that turn; time x -> the
+    same geometric bin grouped_series drew the clicked point from."""
+    import math
+
+    from dash import dcc
+
+    from modules.binning import bin_counts, edge_label, make_bins
+
+    x_key = axes["x"]
+    xg = ALL_MEASURES[x_key]["getter"]
+    if x_key == "conv_number":
+        return []  # grouped mode is undefined for conv_number anyway
+    if x_key == "turn_number":
+        turn = round(interval_x)
+        rows = [p for p in per_request if p["seq"] == turn]
+        label = f"turn {turn}"
+    else:
+        xs_all = [max(xg(p), 1.0) for p in per_request]
+        lo_x, hi_x = 1.0, max(max(xs_all), 1.0)
+        if hi_x == lo_x:
+            hi_x = lo_x * 2
+        log_ratio = math.log(hi_x / lo_x) / 60
+        b = max(0, min(int(math.log(max(interval_x, 1.0) / lo_x) / log_ratio),
+                       59))
+        b_lo, b_hi = lo_x * math.exp(log_ratio * b), lo_x * math.exp(
+            log_ratio * (b + 1))
+        rows = [p for i, p in enumerate(per_request)
+                if b_lo <= xs_all[i] < b_hi]
+        label = f"[{edge_label(b_lo)}, {edge_label(b_hi)}) s"
+    if not rows:
+        return [_card("Interval inspector",
+                      [("no requests", f"in {label}")],
+                      info_text="The clicked interval holds no requests.")]
+
+    kids = [html.Div(
+        [f"Interval — {ALL_MEASURES[x_key]['label']} {label}, "
+         f"{len(rows):,} requests, "
+         f"{len({p['cid'] for p in rows})} conversations",
+         controls.info("Distributions of each chart's y measure over exactly "
+                       "the requests in the clicked interval. Double-click a "
+                       "chart to dismiss.")],
+        style={"fontWeight": "600", "fontSize": F_SMALL, "display": "flex",
+               "alignItems": "center", "marginBottom": "4px"})]
+    for slot in _SLOTS:
+        ym = Y_MEASURES[axes[slot]]
+        values = [ym["getter"](p) for p in rows]
+        edges = make_bins(values, 15, log_x=True)
+        counts = bin_counts(values, edges, log_x=True)
+        fig = go.Figure(go.Bar(
+            x=list(range(len(counts))), y=counts, marker_color="#1f77b4",
+            marker_line_width=0,
+            hovertext=[f"[{edge_label(edges[i])}, {edge_label(edges[i + 1])})"
+                       f" - {c}" for i, c in enumerate(counts)],
+            hoverinfo="text"))
+        tick = max(1, len(counts) // 4)
+        fig.update_layout(**theme.base_layout(
+            title=dict(text=ym["label"], font=dict(size=11)),
+            height=130, margin=dict(l=30, r=8, t=24, b=18), bargap=0.05))
+        fig.update_xaxes(tickvals=[v - 0.5 for v in range(0, len(counts) + 1,
+                                                          tick)],
+                         ticktext=[edge_label(edges[min(v, len(counts))])
+                                   for v in range(0, len(counts) + 1, tick)],
+                         tickfont_size=9)
+        fig.update_yaxes(tickfont_size=9)
+        kids.append(dcc.Graph(figure=fig,
+                              config={"displayModeBar": False},
+                              style={"height": "130px"}))
+    return [html.Div(kids, style={
+        "border": "1px solid #ddd", "borderRadius": "6px", "padding": "10px",
+        "marginBottom": "10px", "background": "white"})]
 
 
 def _summary_panel(arch, cfg, agg, all_selected: bool) -> list:

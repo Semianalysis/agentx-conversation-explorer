@@ -89,6 +89,8 @@ def list_source_datasets() -> list[dict]:
                 "imported_convs": len(list(
                     (DATA_DIR / hf_slug(d["id"]) / "conversations").glob("*.json")))
                 if (DATA_DIR / hf_slug(d["id"]) / "conversations").is_dir() else 0,
+                "resumable": (DATA_DIR / hf_slug(d["id"])
+                              / "import_state.json").is_file(),
             })
     out.sort(key=lambda d: d["updated"], reverse=True)
     return out
@@ -176,12 +178,24 @@ def import_dataset(dataset_id: str, limit: int | None = None) -> dict:
     slug = hf_slug(dataset_id)
     conv_dir = DATA_DIR / slug / "conversations"
     conv_dir.mkdir(parents=True, exist_ok=True)
+    state_path = DATA_DIR / slug / "import_state.json"
 
-    index_items, model_mix, req_counts = [], {}, []
-    totals = {"in": 0, "out": 0, "cached": 0, "uncached": 0,
-              "mainTurns": 0, "subagentTurns": 0, "subagentGroups": 0}
-    block_size = None
-    offset, n_rows = 0, None
+    # resume support: progress state is flushed after every page (each
+    # conversation file is already on disk), so a killed import continues
+    # where it stopped instead of re-downloading gigabytes
+    if state_path.is_file():
+        with open(state_path, encoding="utf-8") as f:
+            st = json.load(f)
+        index_items, model_mix, req_counts = (st["index_items"],
+                                              st["model_mix"], st["req_counts"])
+        totals, block_size, offset = st["totals"], st["block_size"], st["offset"]
+        logger.info("%s: resuming import at conversation %d", dataset_id, offset)
+    else:
+        index_items, model_mix, req_counts = [], {}, []
+        totals = {"in": 0, "out": 0, "cached": 0, "uncached": 0,
+                  "mainTurns": 0, "subagentTurns": 0, "subagentGroups": 0}
+        block_size, offset = None, 0
+    n_rows = None
     while n_rows is None or offset < n_rows:
         page = _fetch_rows(dataset_id, offset, min(_PAGE_ROWS,
                                                    (limit or 10**9) - offset))
@@ -225,6 +239,10 @@ def import_dataset(dataset_id: str, limit: int | None = None) -> dict:
             totals["subagentGroups"] += t["numSubagentGroups"]
         offset += len(page["rows"])
         _BG["done_convs"], _BG["total_convs"] = offset, n_rows
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({"offset": offset, "index_items": index_items,
+                       "model_mix": model_mix, "req_counts": req_counts,
+                       "totals": totals, "block_size": block_size}, f)
         if not page["rows"]:
             raise ValueError(f"{dataset_id}: rows API returned an empty page "
                              f"at offset {offset} of {n_rows}")
@@ -262,4 +280,5 @@ def import_dataset(dataset_id: str, limit: int | None = None) -> dict:
     with open(DATA_DIR / slug / "conversations_index.json", "w",
               encoding="utf-8") as f:
         json.dump(index_items, f)
+    state_path.unlink(missing_ok=True)  # complete -> no resume marker
     return detail
