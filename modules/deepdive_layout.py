@@ -243,7 +243,12 @@ def layout() -> html.Div:
         ] + [
             # each chart takes exactly a third of the window height and the
             # responsive figures follow their container on window resize
-            html.Div(dcc.Graph(id=f"at-deep-y{i}-graph", config=GRAPH_CONFIG,
+            # doubleClick=autosize makes a double-click emit an AUTORANGE
+            # relayout (the default 'reset' restores the layout's own ranges
+            # - i.e. the magnified window - so the cancel never fired)
+            html.Div(dcc.Graph(id=f"at-deep-y{i}-graph",
+                               config={**GRAPH_CONFIG,
+                                       "doubleClick": "autosize"},
                                style={"height": "100%", "width": "100%"}),
                      style={"flex": "1 1 0%", "minHeight": "0"})
             for i in (1, 2, 3)

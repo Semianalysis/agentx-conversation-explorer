@@ -12,7 +12,7 @@ from dash import Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
 from modules import api_client, controls, records, theme
-from modules.arch import ARCHITECTURES, request_compute, resolve_assumptions
+from modules.arch import ARCHITECTURES, resolve_assumptions
 from modules.deepdive_data import (aggregate_selection, grouped_series,
                                    sweep_points, zoom_member_uids)
 from modules.explorer_data import build_conversation_table
@@ -100,10 +100,10 @@ def register_deepdive_callbacks(app) -> None:
                 # so idle cumulative-time stretches are unclickable)
                 return None, {"interval_x": pt["x"]}, *reset
             if zoom and zoom.get("chart") == slot:
-                uid = pt.get("customdata")
-                if not uid:  # grouped/envelope lines carry no request uid
-                    raise PreventUpdate
-                return no_update, {"uid": uid}, *reset
+                # inspect the clicked x interval - same inspector as grouped
+                # mode (single-request cards were useless for cumulative
+                # measures; the user inspects the turn interval)
+                return no_update, {"interval_x": pt["x"]}, *reset
             return ({"chart": slot, "cx": pt["x"], "cy": pt["y"]},
                     None, *reset)
         except PreventUpdate:
@@ -201,12 +201,8 @@ def register_deepdive_callbacks(app) -> None:
                 figs.append(fig)
 
             panel = _summary_panel(arch, cfg, agg, all_selected)
-            if zoom and (point or {}).get("uid"):
-                p = next((r for r in agg["per_request"]
-                          if r["uid"] == point["uid"]), None)
-                if p is not None:
-                    panel = _point_inspector(p, arch, cfg) + panel
-            elif axes.get("grouped") and (point or {}).get("interval_x") is not None:
+            if (point or {}).get("interval_x") is not None and (
+                    zoom or axes.get("grouped")):
                 panel = _interval_inspector(
                     agg["per_request"], axes, point["interval_x"]) + panel
             return (*figs, panel)
@@ -392,74 +388,14 @@ def _card(title: str, rows: list[tuple], info_text: str | None = None) -> html.D
     )
 
 
-def _point_inspector(p: dict, arch: dict, cfg: dict) -> list:
-    """Right-column cards for one clicked request: its sizes and timing, the
-    implied per-phase work, and the serving assumptions it is priced under."""
-    c = request_compute(arch, p["cached_tokens"], p["uncached_tokens"],
-                        p["out_tokens"], cfg)
-    dur_s = p["end_s"] - p["start_s"]
-    moe = arch["n_experts"] > 0
-    return [
-        _card(f"Point — conv #{p['ord']}, turn {p['seq']} ({p['role']})", [
-            ("Model", p["model"]),
-            ("Start / duration", f"{p['start_s']:,.0f}s / {dur_s:,.1f}s",
-             "Conversation-relative start, and the request's own wall-clock."),
-            ("Busy at start", f"{p['busy_s']:,.0f}s",
-             "Active seconds elapsed in this conversation when the request "
-             "began (idle gaps excluded)."),
-            ("Context (total ISL)", fmt_count(p["in_tokens"]),
-             "Total input sequence length — every token the request attends "
-             "over."),
-            ("… cached context", fmt_count(p["cached_tokens"]),
-             "Served from the prompt cache — no prefill compute."),
-            ("… new input (midfill)", fmt_count(p["uncached_tokens"]),
-             "Uncached tokens actually prefilled on top of the cached "
-             "context."),
-            ("OSL (decode)", fmt_count(p["out_tokens"]),
-             "Output sequence length — tokens generated."),
-            ("Cached KV at start", f"{fmt_bytes(p['kv_bytes'])} "
-                                   f"({fmt_count(p['cached_tokens'])} tok)",
-             "KV already held when the turn starts - the cached prefix, "
-             "under the KV precision assumption."),
-            ("Prefill FLOPs", fmt_flops(c["prefill_flops"])),
-            ("Decode FLOPs", fmt_flops(c["decode_flops"])),
-            ("Turn FLOPs", fmt_flops(p["flops"])),
-        ], info_text="One request, as clicked on the magnified chart. Sizes "
-                     "and timing come from the trace; FLOPs/KV are implied "
-                     "under the assumptions below. Double-click a chart to "
-                     "close the magnifier and this inspector."),
-        _card("Serving assumptions at this point", [
-            ("Architecture", arch["label"]),
-            ("TP / PP / DP",
-             f"{cfg['tp']} / {cfg.get('pp', 1)} / {cfg.get('dp', 1)}",
-             "Tensor / pipeline / data parallelism from the Explorer "
-             "assumption bar."),
-            ("EP",
-             (f"all-to-all over {arch['n_experts']} experts, "
-              f"top-{arch['topk']} (no EP degree modeled)") if moe
-             else "dense architecture — none",
-             "Expert-parallel traffic is modeled as full dispatch+combine "
-             "all-to-all; an explicit EP degree is not a knob yet."),
-            ("Weights / KV precision",
-             f"{cfg['dtype_weights']} / {cfg['dtype_kv']}"),
-            ("MFU / MBU",
-             f"{cfg['mfu'] * 100:.0f}% / {cfg['mbu'] * 100:.0f}%"),
-            ("Disaggregation", "none assumed",
-             "Prefill, midfill (prefill on cached context), and decode are "
-             "priced as colocated on one pool — disaggregated serving is "
-             "not modeled, and the traces don't record deployment topology."),
-        ], info_text="What this point's implied numbers are priced under — "
-                     "all global assumptions from the Explorer bar, applied "
-                     "identically to every request."),
-    ]
-
-
 def _interval_inspector(per_request: list[dict], axes: dict,
                         interval_x: float) -> list:
-    """Right-column cards for one clicked x interval in grouped mode: which
-    rows fall in it, and a mini histogram of each chart's y measure over
-    exactly those rows. x=turn # -> the interval IS that turn; time x -> the
-    same geometric bin grouped_series drew the clicked point from."""
+    """Right-column cards for one clicked x interval (grouped mean line OR a
+    magnified point cloud): which rows fall in it, mean turn FLOPs, and a
+    mini histogram of each chart's y measure over exactly those rows.
+    x=turn # -> the interval IS that turn; time x -> the geometric bin the
+    click landed in. Cumulative measures are histogrammed as their PER-TURN
+    counterparts (running totals are meaningless inside one interval)."""
     import math
 
     from dash import dcc
@@ -469,7 +405,7 @@ def _interval_inspector(per_request: list[dict], axes: dict,
     x_key = axes["x"]
     xg = ALL_MEASURES[x_key]["getter"]
     if x_key == "conv_number":
-        return []  # grouped mode is undefined for conv_number anyway
+        return []
     if x_key == "turn_number":
         turn = round(interval_x)
         rows = [p for p in per_request if p["seq"] == turn]
@@ -492,17 +428,28 @@ def _interval_inspector(per_request: list[dict], axes: dict,
                       [("no requests", f"in {label}")],
                       info_text="The clicked interval holds no requests.")]
 
+    n = len(rows)
+    mean_flops = sum(p["flops"] for p in rows) / n
     kids = [html.Div(
         [f"Interval — {ALL_MEASURES[x_key]['label']} {label}, "
-         f"{len(rows):,} requests, "
+         f"{n:,} requests, "
          f"{len({p['cid'] for p in rows})} conversations",
          controls.info("Distributions of each chart's y measure over exactly "
-                       "the requests in the clicked interval. Double-click a "
-                       "chart to dismiss.")],
+                       "the requests in the clicked interval (cumulative "
+                       "measures are shown as their PER-TURN counterparts — "
+                       "running totals are meaningless inside one interval). "
+                       "Double-click a chart to dismiss.")],
         style={"fontWeight": "600", "fontSize": F_SMALL, "display": "flex",
-               "alignItems": "center", "marginBottom": "4px"})]
+               "alignItems": "center", "marginBottom": "4px"}),
+        html.Div(f"mean turn FLOPs: {fmt_flops(mean_flops)}",
+                 title="Average implied FLOPs (prefill + decode) per request "
+                       "in this interval, under the current assumptions.",
+                 style={"fontFamily": MONO, "fontSize": "11px",
+                        "color": "#555", "marginBottom": "2px"})]
+    _PER_TURN = {"cumulative_flops": "current_flops",
+                 "cumulative_output_tokens": "new_output_tokens"}
     for slot in _SLOTS:
-        ym = Y_MEASURES[axes[slot]]
+        ym = Y_MEASURES[_PER_TURN.get(axes[slot], axes[slot])]
         values = [ym["getter"](p) for p in rows]
         edges = make_bins(values, 15, log_x=True)
         counts = bin_counts(values, edges, log_x=True)
