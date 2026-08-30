@@ -82,9 +82,10 @@ Y_MEASURES = {
              "is this times KV bytes/token under the assumptions.",
         getter=lambda p: p["in_tokens"]),
     "new_input": dict(
-        label="new input (uncached tokens)",
+        label="uncached input (tokens)",
         info="Uncached input tokens — new text (user message, tool results, "
-             "agent hand-offs) not already served from the prompt cache.",
+             "agent hand-offs) not already served from the prompt cache; "
+             "this is what prefill actually computes.",
         getter=lambda p: p["uncached_tokens"]),
     "decode_output": dict(
         label="decode output (tokens)",
@@ -98,7 +99,7 @@ Y_MEASURES = {
 }
 
 ALL_MEASURES = {**X_MEASURES, **Y_MEASURES}
-DEFAULT_AXES = {"x": "token_count", "y1": "kv_cache_bytes",
+DEFAULT_AXES = {"x": "turn_number", "y1": "kv_cache_tokens",
                 "y2": "new_input", "y3": "decode_output"}
 
 

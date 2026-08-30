@@ -1,65 +1,49 @@
-# AgentX Data Explorer
+# AgentX Conversation Explorer
 
-A standalone [Dash](https://dash.plotly.com/) app for exploring the **AgentX
-agentic-inference trace datasets** published by SemiAnalysis at
-[inferencex.semianalysis.com/agentx](https://inferencex.semianalysis.com/agentx/) —
-real multi-turn Claude Code coding sessions (main agent + subagents, per-request
-token and timing detail) — and for estimating the compute, memory-bandwidth, and
-network activity those traces imply on an assumed serving stack.
+A standalone [Dash](https://dash.plotly.com/) app for exploring agentic-inference
+trace datasets from [InferenceX AgentX](https://inferencex.semianalysis.com/agentx/)
+— real Claude Code conversation traces, viewed through the lens of the serving
+compute they imply.
 
-## Quick start
+## Quickstart
 
 ```bash
 pip install -r requirements.txt
 python app.py            # -> http://localhost:8050
 ```
 
-On first run, open the **Overview** tab, click *Import / refresh datasets*, then
-*Download traces* for each dataset (fetched once from the public InferenceX API
-into a local `data/` cache, ~40 MB per dataset).
-
-```bash
-python -m pytest tests/  # unit tests
-```
+On first run, open the **Overview** tab, click **Import / refresh datasets**, then
+**Download traces** on a dataset card. Traces are cached under `data/` (gitignored);
+every other tab reads only that cache.
 
 ## Tabs
 
-- **Overview** — dataset registry cards: token totals, cached fraction, model mix.
-- **Explorer** — one context-growth curve per conversation (turn count vs context
-  length); a sortable, range-filterable conversation list (shift-click checkbox
-  ranges) that drives a cross-tab selection; serving-assumption controls (all
-  defaulting to "any").
-- **Turns** — per-request histograms (context, new uncached input, decode output),
-  filterable by model and main/subagent role.
-- **Correlations** — condition on a range of one dimension (box-select or min/max),
-  see conditional histograms of the others.
-- **Deep-dive** — aggregate implied FLOPs / HBM movement / interconnect traffic /
-  single-GPU-equivalent time over the selected conversations, with a measure matrix
-  (one shared x, three y axes) and grouped mean / min-max envelope modes.
+Every tab is a viewport onto the same state: the dataset, the conversation
+selection, and the serving assumptions are shared everywhere; per-tab controls
+(measures, scales, filters, inspectors) are local views. Hover the ⓘ tags anywhere
+in the app for explanations of measures, columns, and controls.
 
-## Data source
+- **Overview** — import datasets and see summary cards (token totals, model mix,
+  cached fraction).
+- **Explorer** — one context-growth curve per conversation (x: turn count /
+  cumulative time / busy time), a serving-assumption bar (architecture, GPU,
+  precisions, TP/PP/DP, MFU/MBU — all defaulting to documented values), and the
+  sortable/filterable conversation list that drives the cross-tab selection.
+- **Correlations** — three histograms with selectable measures (KV cache,
+  uncached input, decode output, turn FLOPs) over turn/time/value bins. Click
+  bars to build color-coded selections on one chart and see how much of every
+  bar on the other charts correlates, stacked by color, with per-selection
+  inspectors in the left panel.
+- **Deep-dive** — implied FLOPs / memory / network aggregated over the selected
+  conversations, three scatter charts over a shared x measure, a click magnifier
+  (5×) with cross-chart highlighting, and a per-request point inspector.
 
-The app consumes the InferenceX public REST API (`/api/v1/datasets/...`); the
-per-conversation `structure` endpoint carries per-request records
-(`model, in, cached, uncached, out, startS, endS`) with the invariant
-`in == cached + uncached`. Raw traces are also mirrored on
-[HuggingFace](https://huggingface.co/datasets/semianalysisai/cc-traces-weka-062126).
-See `docs/data-source-notes.md`.
+All compute/memory/network figures are **implied**: derived from the traces' token
+counts under the serving assumptions you pick — nothing is measured on hardware,
+and the app never fabricates missing values.
 
-## A note on the estimates
+## Data
 
-Model internals for the traced models are not public. The deep-dive pairs observed
-token/timing data with a **user-chosen architecture preset** (dense or MoE at
-several scales) and GPU preset; all FLOPs/bytes/network figures are standard
-roofline estimates — formulas documented in `modules/arch.py` — not measurements.
-
-## Layout
-
-```
-app.py                     Dash assembly (tabs, build stamp)
-modules/<tab>_layout.py    layout + that tab's dcc.Stores
-modules/<tab>_callbacks.py callbacks (registered per tab)
-modules/*_data.py, arch.py, measures.py, records.py   pure data/math (unit-test surface)
-assets/*.js                shift-click range select, ctrl-click sort semantics
-tests/                     pytest suite
-```
+Per-conversation traces are fetched from the InferenceX AgentX API and cached
+locally. The bundled dataset registry starts with `cc-traces-weka-062126`
+(393 conversations, ~167k requests) and its 256k-context variant.

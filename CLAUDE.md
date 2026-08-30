@@ -94,6 +94,18 @@ Independent project — it imitates the InferenceX Explorer tab of
 Data-source findings and open questions: `docs/data-source-notes.md`.
 Interaction/layout patterns to imitate: `docs/ix-explorer-reference.md`.
 
+Startup defaults (user 2026-08-29, bld 24): dataset = cc-traces-weka-062126 (the
+FULL traces — DEFAULT_DATASET_SLUG in explorer_callbacks; the -256k variant stays
+available but is "not very useful"); Explorer chart = turn count on LOG x;
+Correlations = x turn_number (log bins), y1 KV cache (tokens), y2 uncached input
+(tokens) — that label, it's clearer than "new input" — y3 decode output (tokens).
+
+RELEASES: public repo https://github.com/Semianalysis/agentx-conversation-explorer
+(created at 0.24) carries user-facing releases; this private repo is the working
+repo. To release: merge to main here, tag vX.Y, push main+tag to the `public`
+remote, `gh release create` on the public repo. README.md + requirements.txt are
+the public front door — keep them current.
+
 ## Coding style — the minimal set
 
 Distilled 2026-08-26 from model_charts guidance (`CLAUDE.md` Engineering Method,

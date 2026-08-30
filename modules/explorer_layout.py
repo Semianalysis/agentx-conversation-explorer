@@ -153,7 +153,7 @@ def layout() -> html.Div:
             id="at-explorer-xscale-radio",
             options=[{"label": " linear", "value": "linear"},
                      {"label": " log", "value": "log"}],
-            value="linear", style={"fontSize": F_SMALL}),
+            value="log", style={"fontSize": F_SMALL}),
         dcc.Checklist(
             id="at-explorer-onlysel-cl",
             options=[{"label": html.Span([

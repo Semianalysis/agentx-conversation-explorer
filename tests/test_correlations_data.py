@@ -15,15 +15,18 @@ from modules.figures import selection_to_bins
 
 class TestMeasureRegistry(unittest.TestCase):
     def test_defaults_and_shapes(self):
-        self.assertEqual(DEFAULT_AXES["x"], "token_count")
-        self.assertEqual(DEFAULT_AXES["y1"], "kv_cache_bytes")
+        # startup defaults (user 2026-08-29): turn-count bins, token measures
+        self.assertEqual(DEFAULT_AXES["x"], "turn_number")
+        self.assertEqual(DEFAULT_AXES["y1"], "kv_cache_tokens")
         self.assertEqual(DEFAULT_AXES["y2"], "new_input")
         self.assertEqual(DEFAULT_AXES["y3"], "decode_output")
         self.assertIn("turn_flops", Y_MEASURES)
-        self.assertIn("kv_cache_tokens", Y_MEASURES)  # token-count KV choice
+        self.assertIn("kv_cache_bytes", Y_MEASURES)
         for key, m in ALL_MEASURES.items():
             self.assertTrue(m.get("info", "").strip(), f"{key} missing info")
         self.assertEqual(Y_MEASURES["turn_flops"]["label"], "turn FLOPs")
+        self.assertEqual(Y_MEASURES["new_input"]["label"],
+                         "uncached input (tokens)")
 
     def test_getters_read_enriched_rows(self):
         row = {"seq": 7, "start_s": 100.0, "busy_s": 40.0, "kv_bytes": 5e9,
