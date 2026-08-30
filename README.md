@@ -46,4 +46,9 @@ and the app never fabricates missing values.
 
 Per-conversation traces are fetched from the InferenceX AgentX API and cached
 locally. The bundled dataset registry starts with `cc-traces-weka-062126`
-(393 conversations, ~167k requests) and its 256k-context variant.
+(393 conversations, ~167k requests) and its 256k-context variant — both
+published under Apache-2.0 on HuggingFace.
+
+## License
+
+Apache-2.0 — same license as the AgentX trace datasets this tool explores.
