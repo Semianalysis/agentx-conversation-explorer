@@ -94,6 +94,15 @@ Independent project — it imitates the InferenceX Explorer tab of
 Data-source findings and open questions: `docs/data-source-notes.md`.
 Interaction/layout patterns to imitate: `docs/ix-explorer-reference.md`.
 
+Internal sources (bld 25): AGENTX_INTERNAL=1 reveals the Overview "Internal
+sources" panel (HF org listings via AGENTX_HF_SOURCES, private access via the
+user's HF_TOKEN — the security boundary is HF's ACL, never app code; no
+unpublished names in the codebase). modules/weka_raw.py is a bit-identical port
+of InferenceX-app's weka-structure.ts (contract-checked against API structures);
+modules/hf_client.py imports raw datasets into the standard data/hf--<name>/
+cache so every tab works unchanged. Only cc-traces-weka-family schemas import;
+others are listed but refuse loudly.
+
 Startup defaults (user 2026-08-29, bld 24): dataset = cc-traces-weka-062126 (the
 FULL traces — DEFAULT_DATASET_SLUG in explorer_callbacks; the -256k variant stays
 available but is "not very useful"); Explorer chart = turn count on LOG x;

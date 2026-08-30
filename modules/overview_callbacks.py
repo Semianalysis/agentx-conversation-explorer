@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import logging
 
-from dash import ALL, Input, Output, State, callback_context, html
+from dash import ALL, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
-from modules import api_client, records
+from modules import api_client, hf_client, records
 from modules.controls import info
 from modules.explorer_data import apply_selection
 from modules.theme import F_SMALL, MONO, color_for, fmt_count
@@ -122,6 +122,9 @@ def _dataset_card(detail: dict, n_cached: int) -> html.Div:
             html.Div(style={"display": "flex", "alignItems": "center", "gap": "12px",
                             "marginTop": "12px"},
                      children=[
+                         html.Span("imported locally (internal source)",
+                                   style={"fontSize": F_SMALL, "color": "#a60"})
+                         if detail.get("source") == "hf" else
                          html.Button(
                              "Download traces" if n_cached < n_convs else "Re-check traces",
                              id={"type": "at-overview-download-btn", "slug": slug},
@@ -260,12 +263,95 @@ def register_overview_callbacks(app) -> None:
     )
     def render_cards(datasets, cache_counts):
         try:
+            # published datasets + any locally imported internal (HF) ones —
+            # local files are the user's own, so they always render
+            datasets = (datasets or []) + hf_client.local_hf_datasets()
             if not datasets:
                 return html.Div(
                     "No datasets imported yet — click 'Import / refresh datasets'.",
                     style={"color": "#777", "fontSize": "15px", "padding": "20px"})
             cache_counts = cache_counts or {}
-            return [_dataset_card(d, cache_counts.get(d["slug"], 0)) for d in datasets]
+            return [_dataset_card(
+                d, cache_counts.get(d["slug"],
+                                    len(api_client.cached_conversation_ids(d["slug"]))))
+                for d in datasets]
         except Exception:
             logger.exception("overview card render failed")
             raise PreventUpdate
+
+    if not hf_client.internal_mode():
+        return  # internal-source callbacks reference components that only
+        # exist in internal mode — never registered in the public build
+
+    @app.callback(
+        Output("at-overview-hf-list", "children"),
+        Input("at-overview-hf-list-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def list_internal(_n):
+        try:
+            rows = hf_client.list_source_datasets()
+            if not rows:
+                return html.Div("no datasets visible for "
+                                f"{', '.join(hf_client.hf_sources())}",
+                                style={"fontSize": F_SMALL, "color": "#999"})
+            out = []
+            for d in rows:
+                badge = ("PRIVATE" if d["private"] else "public")
+                action = (html.Button(
+                    "Import", id={"type": "at-overview-hf-import-btn",
+                                  "ds": d["id"]}, n_clicks=0,
+                    title="Download every conversation from HuggingFace and "
+                          "flatten it into the local cache (same format as "
+                          "published datasets; can take minutes).",
+                    style={"fontSize": "11px", "padding": "1px 8px"})
+                    if d["importable"] else
+                    html.Span("schema not supported",
+                              style={"fontSize": "11px", "color": "#999"}))
+                out.append(html.Div(
+                    style={"display": "flex", "alignItems": "center",
+                           "gap": "10px", "fontSize": "12px",
+                           "fontFamily": MONO, "padding": "1px 0"},
+                    children=[
+                        html.Span(d["id"], style={"flex": "0 0 480px",
+                                                  "overflow": "hidden",
+                                                  "textOverflow": "ellipsis"}),
+                        html.Span(d["updated"], style={"color": "#666"}),
+                        html.Span(badge,
+                                  style={"color": "#a33" if d["private"] else "#2a7"}),
+                        html.Span(f"imported: {d['imported_convs']} convs"
+                                  if d["imported_convs"] else "",
+                                  style={"color": "#2a7"}),
+                        action,
+                    ]))
+            return out
+        except Exception:
+            logger.exception("internal dataset listing failed")
+            return html.Div("listing FAILED — see server log (is HF_TOKEN "
+                            "valid?)", style={"fontSize": F_SMALL, "color": "#a33"})
+
+    @app.callback(
+        Output("at-overview-cache-store", "data", allow_duplicate=True),
+        Output("at-overview-hf-status", "children"),
+        Input({"type": "at-overview-hf-import-btn", "ds": ALL}, "n_clicks"),
+        State("at-overview-cache-store", "data"),
+        prevent_initial_call=True,
+    )
+    def import_internal(n_clicks_list, cache_counts):
+        try:
+            trig = callback_context.triggered_id
+            tval = (callback_context.triggered[0]["value"]
+                    if callback_context.triggered else None)
+            if not isinstance(trig, dict) or not tval:
+                raise PreventUpdate
+            detail = hf_client.import_dataset(trig["ds"])
+            cache_counts = dict(cache_counts or {})
+            cache_counts[detail["slug"]] = detail["conversation_count"]
+            records.clear_pools()
+            return cache_counts, (f"imported {detail['slug']}: "
+                                  f"{detail['conversation_count']} conversations")
+        except PreventUpdate:
+            raise
+        except Exception as e:
+            logger.exception("internal dataset import failed")
+            return no_update, f"import FAILED: {e}"

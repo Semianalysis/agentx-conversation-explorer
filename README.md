@@ -49,6 +49,17 @@ locally. The bundled dataset registry starts with `cc-traces-weka-062126`
 (393 conversations, ~167k requests) and its 256k-context variant — both
 published under Apache-2.0 on HuggingFace.
 
+## Internal mode (optional)
+
+Operators who capture their own traces can point the explorer at additional
+HuggingFace sources. Set `AGENTX_INTERNAL=1` to reveal an "Internal sources"
+panel on the Overview tab; it lists the datasets of the namespaces in
+`AGENTX_HF_SOURCES` (comma-separated, default `semianalysisai`) and imports
+raw `cc-traces-weka`-format datasets locally. With a standard `HF_TOKEN` set,
+private datasets your token can read appear too — access always follows
+HuggingFace's own permissions. The default (public) configuration shows only
+the datasets published on the AgentX site.
+
 ## License
 
 Apache-2.0 — same license as the AgentX trace datasets this tool explores.
