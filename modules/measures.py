@@ -53,16 +53,12 @@ X_MEASURES = {
 
 Y_MEASURES = {
     "context_tokens": dict(
-        label="context size (tokens)", scale="log", cumulative=False,
-        info="Total input tokens of the request (cached + new) — the context "
-             "the model attends over.",
-        getter=lambda p: _clamp1(p["in_tokens"])),
-    "context_kv_bytes": dict(
-        label="context KV-cache size (bytes)", scale="log", cumulative=False,
-        info="Bytes of KV cache the request's context occupies under the "
-             "selected architecture and KV precision (layers × KV entries per "
-             "token × bytes per entry).",
-        getter=lambda p: _clamp1(p["kv_bytes"])),
+        label="cached context at turn start (tokens)", scale="log",
+        cumulative=False,
+        info="Input tokens ALREADY in the KV cache when the turn starts (the "
+             "prefix-cache hit), distinct from the uncached input the turn "
+             "then prefills. cached + uncached = the total context attended.",
+        getter=lambda p: _clamp1(p["cached_tokens"])),
     "new_input_tokens": dict(
         label="uncached input (tokens, user/tool/agent)", scale="log",
         cumulative=False,
@@ -81,23 +77,12 @@ Y_MEASURES = {
              "and including this request. With few conversations selected, "
              "drawn as one line per conversation.",
         getter=lambda p: _clamp1(p["cum_out"])),
-    "cumulative_flops": dict(
-        label="cumulative FLOPs (per conv)", scale="log", cumulative=True,
-        info="Running total of implied FLOPs (prefill + decode) within the "
-             "conversation under the selected architecture — implied by token "
-             "counts, not measured.",
-        getter=lambda p: _clamp1(p["cum_flops"])),
-    "current_flops": dict(
-        label="turn FLOPs", scale="log", cumulative=False,
-        info="Implied FLOPs of this single request (prefill + decode) under "
-             "the selected architecture.",
-        getter=lambda p: _clamp1(p["flops"])),
 }
 
 ALL_MEASURES = {**X_MEASURES, **Y_MEASURES}
 
-DEFAULT_AXES = {"x": "cumulative_time", "y1": "context_tokens",
-                "y2": "cumulative_flops", "y3": "current_flops"}
+DEFAULT_AXES = {"x": "busy_time", "y1": "context_tokens",
+                "y2": "new_input_tokens", "y3": "new_output_tokens"}
 
 
 def measure_series(per_request: list[dict], key: str) -> list[float]:

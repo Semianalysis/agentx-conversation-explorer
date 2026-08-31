@@ -63,13 +63,10 @@ class TestMeasureRegistry(unittest.TestCase):
                                rows[0]["flops"] + rows[1]["flops"])
         self.assertGreater(rows[1]["cum_flops"], rows[0]["cum_flops"])
 
-    def test_kv_bytes_enrichment(self):
-        p = self.agg["per_request"][0]
-        kv_per_tok = (self.arch["n_layers"]
-                      * self.arch["kv_entries_per_token_per_layer"]
-                      * DTYPE_BYTES[self.cfg["dtype_kv"]])
-        self.assertEqual(p["kv_bytes"], p["in_tokens"] * kv_per_tok)
-        self.assertEqual(measure_series([p], "context_kv_bytes")[0], p["kv_bytes"])
+    def test_no_hardware_measures(self):
+        # FLOPs / byte measures removed 2026-08-30 (simulation's job)
+        for key in ("context_kv_bytes", "cumulative_flops", "current_flops"):
+            self.assertNotIn(key, Y_MEASURES)
 
     def test_unknown_measure_raises(self):
         with self.assertRaises(KeyError):
@@ -188,15 +185,54 @@ class TestZoomHelpers(unittest.TestCase):
     def test_zoom_member_uids(self):
         from modules.deepdive_data import zoom_member_uids
         rows = [
-            {"uid": "a", "seq": 5, "in_tokens": 100},    # inside both
-            {"uid": "b", "seq": 50, "in_tokens": 100},   # x outside
-            {"uid": "c", "seq": 5, "in_tokens": 10_000}, # y outside
+            {"uid": "a", "seq": 5, "cached_tokens": 100},     # inside both
+            {"uid": "b", "seq": 50, "cached_tokens": 100},    # x outside
+            {"uid": "c", "seq": 5, "cached_tokens": 10_000},  # y outside
         ]
         members = zoom_member_uids(rows, "turn_number", "context_tokens",
                                    window_x=[0.0, 10.0],        # linear x
                                    window_y=[1.0, 3.0],         # log10 y
                                    x_scale="linear")
         self.assertEqual(members, {"a"})
+
+
+class TestSweepPoints(unittest.TestCase):
+    def _agg(self, pool, ids, ords):
+        from modules.deepdive_data import aggregate_selection
+        arch_key, _, cfg = resolve_assumptions(None)
+        return aggregate_selection(pool, ids, ARCHITECTURES[arch_key], cfg, ords)
+
+    def test_even_spacing_zero_start_and_two_conv_stop(self):
+        from modules.deepdive_data import sweep_points
+        # cA spans 0..90s, cB spans 0..45s, cC dies at 9s -> t_last = 45 (2nd max)
+        pool = ([_rec("cA", i, start=float(i * 10), end=i * 10 + 1, in_t=1000,
+                      unc=100, out=50) for i in range(10)]
+                + [_rec("cB", i, start=float(i * 5), end=i * 5 + 1, in_t=3000,
+                        unc=300, out=150) for i in range(10)]
+                + [_rec("cC", 0, start=9.0, end=10.0)])
+        agg = self._agg(pool, ["cA", "cB", "cC"], {"cA": 1, "cB": 2, "cC": 3})
+        sw = sweep_points(agg["per_request"], "cumulative_time")
+        self.assertEqual(sw["t_last"], 45.0)
+        ts = [p["cumulative_time"] for p in sw["points"]]
+        self.assertEqual(ts[0], 0.0)                    # includes time zero
+        self.assertLessEqual(max(ts), 45.0)             # stops at 2-conv end
+        self.assertEqual(len(ts), 10)                   # dense data: all kept
+        for p in sw["points"]:                          # averages of members
+            # cached context at turn start (in_t - unc(100)), NOT total input
+            self.assertGreaterEqual(p["cached_context_tokens"], 900)
+            self.assertLessEqual(p["cached_context_tokens"], 2900)
+            self.assertGreater(p["n_requests"], 0)
+        # no model / GPU keys anywhere - simulation sweeps those
+        self.assertFalse(any("model" in p or "gpu" in p for p in sw["points"]))
+
+    def test_guards(self):
+        from modules.deepdive_data import sweep_points
+        pool = [_rec("cA", 0, start=0.0, end=1.0)]
+        agg = self._agg(pool, ["cA"], {"cA": 1})
+        with self.assertRaises(ValueError):
+            sweep_points(agg["per_request"], "cumulative_time")  # 1 conv
+        with self.assertRaises(ValueError):
+            sweep_points(agg["per_request"], "conv_number")      # bad x
 
 
 class TestGroupedSeries(unittest.TestCase):
@@ -217,15 +253,20 @@ class TestGroupedSeries(unittest.TestCase):
                                 "context_tokens")
         self.assertEqual(g["xs"], [1, 2])
         self.assertEqual(g["n_alive"], [2, 1])       # cB dropped out at turn 2
-        self.assertAlmostEqual(g["mean"][0], 1500.0)  # (1000+2000)/2
-        self.assertAlmostEqual(g["mean"][1], 3000.0)  # only cA — no padding
-        self.assertEqual((g["lo"][0], g["hi"][0]), (1000.0, 2000.0))
-        self.assertEqual((g["lo"][1], g["hi"][1]), (3000.0, 3000.0))
+        # context_tokens = CACHED at start = in_t - unc(100) since 2026-08-30
+        self.assertAlmostEqual(g["mean"][0], 1400.0)  # (900+1900)/2
+        self.assertAlmostEqual(g["mean"][1], 2900.0)  # only cA — no padding
+        self.assertEqual((g["lo"][0], g["hi"][0]), (900.0, 1900.0))
+        self.assertEqual((g["lo"][1], g["hi"][1]), (2900.0, 2900.0))
 
     def test_envelope_brackets_mean(self):
         g = self.grouped_series(self.agg["per_request"], "cumulative_time",
                                 "new_output_tokens", n_bins=10)
-        for lo, m, hi in zip(g["lo"], g["mean"], g["hi"]):
+        for lo, p10, m, p90, hi in zip(g["lo"], g["p10"], g["mean"],
+                                       g["p90"], g["hi"]):
+            self.assertLessEqual(lo, p10)
+            self.assertLessEqual(p10, p90)   # band ordered
+            self.assertLessEqual(p90, hi)
             self.assertLessEqual(lo, m)
             self.assertLessEqual(m, hi)
 

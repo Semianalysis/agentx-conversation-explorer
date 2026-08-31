@@ -22,10 +22,9 @@ from dash.exceptions import PreventUpdate
 
 from modules import api_client, records
 from modules.arch import ARCHITECTURES, resolve_assumptions
-from modules.binning import (bin_counts, bin_weighted, edge_label,
-                             filter_records, make_bins)
-from modules.correlations_data import (ALL_MEASURES, CHART_SLOTS, DEFAULT_AXES,
-                                       X_MEASURES, Y_MEASURES, add_selection,
+from modules.binning import bin_counts, edge_label, filter_records, make_bins
+from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES, MEASURES,
+                                       add_selection,
                                        assign_bin, assign_bin_range, bin_runs,
                                        clear_selection, initial_store,
                                        measure_values, member_mask,
@@ -101,21 +100,22 @@ def register_correlations_callbacks(app) -> None:
         Input("at-corr-models-dd", "value"),
         Input("at-corr-roles-cl", "value"),
         Input("at-corr-xscale-radio", "value"),
+        Input("at-corr-turnlo-input", "value"),
+        Input("at-corr-turnhi-input", "value"),
         prevent_initial_call=True,
     )
-    def coalesce_filters(slug, models, roles, xscale):
+    def coalesce_filters(slug, models, roles, xscale, turn_lo, turn_hi):
         return {"slug": slug, "models": models or [], "roles": roles or [],
-                "xscale": xscale}
+                "xscale": xscale, "turn_lo": turn_lo, "turn_hi": turn_hi}
 
     @app.callback(
         Output("at-corr-axes-store", "data"),
-        Input("at-corr-x-radio", "value"),
         Input("at-corr-y1-radio", "value"),
         Input("at-corr-y2-radio", "value"),
         Input("at-corr-y3-radio", "value"),
     )
-    def coalesce_axes(x, y1, y2, y3):
-        return {"x": x, "y1": y1, "y2": y2, "y3": y3}
+    def coalesce_axes(y1, y2, y3):
+        return {"y1": y1, "y2": y2, "y3": y3}
 
     @app.callback(
         Output("at-corr-selections-store", "data"),
@@ -232,45 +232,41 @@ def register_correlations_callbacks(app) -> None:
                                  style={"fontSize": "11px", "color": "#999"}),
                         "", "")
             axes = axes or DEFAULT_AXES
-            if (axes.get("x") not in X_MEASURES
-                    or any(axes.get(s) not in Y_MEASURES for s in CHART_SLOTS)):
+            if any(axes.get(c) not in MEASURES for c in CHART_SLOTS):
                 raise PreventUpdate  # radios not initialized yet
             store = store or initial_store()
             log_x = filters["xscale"] == "log"
-            token_mode = axes["x"] == "token_count"
 
             enriched = _enriched_rows(filters["slug"], conv_selection, config)
             filtered, gates = filter_records(
                 enriched, {"models": filters["models"], "roles": filters["roles"]})
+            def _num(v):  # number inputs can deliver strings; '' = unset
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+            lo_t, hi_t = _num(filters.get("turn_lo")), _num(filters.get("turn_hi"))
+            if lo_t is not None or hi_t is not None:
+                filtered = [r for r in filtered
+                            if (lo_t is None or r["seq"] >= lo_t)
+                            and (hi_t is None or r["seq"] <= hi_t)]
+                gates["n_turn_range"] = len(filtered)
             if not filtered:
-                gate_txt = " → ".join(f"{k}={v:,}" for k, v in gates.items())
-                figs = [empty_figure(Y_MEASURES[axes[s]]["label"],
+                gate_txt = " -> ".join(f"{k}={v:,}" for k, v in gates.items())
+                figs = [empty_figure(MEASURES[axes[c]]["label"],
                                      f"0 rows after filters ({gate_txt})",
-                                     height=None) for s in CHART_SLOTS]
+                                     height=None) for c in CHART_SLOTS]
                 return (*figs, *no_cursor, [], "", gate_txt)
 
-            # per-chart binning variable, edges, and pool heights
-            y_vals = {s: measure_values(filtered, axes[s]) for s in CHART_SLOTS}
-            if token_mode:
-                bin_vals = dict(y_vals)  # each chart bins its own measure
-                edges = {s: make_bins(bin_vals[s], _N_BINS, log_x)
-                         for s in CHART_SLOTS}
-                heights = {s: [float(c) for c in
-                               bin_counts(bin_vals[s], edges[s], log_x)]
-                           for s in CHART_SLOTS}
-                y_titles = {s: "requests" for s in CHART_SLOTS}
-                x_titles = {s: Y_MEASURES[axes[s]]["label"] for s in CHART_SLOTS}
-            else:
-                x_vals = measure_values(filtered, axes["x"])
-                shared = make_bins(x_vals, _N_BINS, log_x)
-                bin_vals = {s: x_vals for s in CHART_SLOTS}
-                edges = {s: shared for s in CHART_SLOTS}
-                heights = {s: bin_weighted(x_vals, shared, log_x, y_vals[s])
-                           for s in CHART_SLOTS}
-                y_titles = {s: f"Σ {Y_MEASURES[axes[s]]['label']}"
-                            for s in CHART_SLOTS}
-                x_titles = {s: X_MEASURES[axes["x"]]["label"]
-                            for s in CHART_SLOTS}
+            # each chart bins ITS OWN x measure; bars = request counts
+            bin_vals = {c: measure_values(filtered, axes[c])
+                        for c in CHART_SLOTS}
+            edges = {c: make_bins(bin_vals[c], _N_BINS, log_x)
+                     for c in CHART_SLOTS}
+            heights = {c: [float(n) for n in
+                           bin_counts(bin_vals[c], edges[c], log_x)]
+                       for c in CHART_SLOTS}
+            y_vals = bin_vals  # inspector contribution sums read these
 
             # member rows per non-empty selection (on the selection chart)
             sel_chart = store["chart"]
@@ -283,7 +279,9 @@ def register_correlations_callbacks(app) -> None:
                     members = [j for j, m in enumerate(mask) if m]
                 sel_rows.append({"sel": s, "name": f"S{i + 1}",
                                  "color": selection_color(s["sid"]),
-                                 "members": members})
+                                 "members": members,
+                                 "member_seqs": ([filtered[j]["seq"] for j in members]
+                                                 if members else [])})
 
             figs = []
             for c in CHART_SLOTS:
@@ -295,21 +293,17 @@ def register_correlations_callbacks(app) -> None:
                     for r in sel_rows:
                         if r["members"] is None:
                             continue
-                        if token_mode:
-                            mvals = [bin_vals[c][j] for j in r["members"]]
-                            hts = [float(v) for v in
-                                   bin_counts(mvals, edges[c], log_x)]
-                        else:
-                            mx = [bin_vals[c][j] for j in r["members"]]
-                            mw = [y_vals[c][j] for j in r["members"]]
-                            hts = bin_weighted(mx, edges[c], log_x, mw)
+                        mvals = [bin_vals[c][j] for j in r["members"]]
+                        hts = [float(n) for n in
+                               bin_counts(mvals, edges[c], log_x)]
                         overlays.append((hts, r["color"], r["name"]))
-                title = Y_MEASURES[axes[c]]["label"] + (
+                title = MEASURES[axes[c]]["label"] + (
                     " — conditioned" if overlays else "")
                 figs.append(multi_histogram_figure(
-                    edges[c], heights[c], title, x_titles[c], y_titles[c],
-                    log_x, own_marks=own, overlays=overlays,
-                    stat_values=y_vals[c]))
+                    edges[c], heights[c], title,
+                    MEASURES[axes[c]]["label"], "requests", log_x,
+                    own_marks=own, overlays=overlays,
+                    stat_values=bin_vals[c]))
 
             # armed cursor: on the selection chart, or everywhere while
             # nothing is anchored yet
@@ -319,11 +313,11 @@ def register_correlations_callbacks(app) -> None:
 
             inspectors = [
                 _inspector_section(r, store, axes, edges, heights, y_vals,
-                                   token_mode, len(filtered))
+                                   len(filtered))
                 for r in sel_rows
             ]
             status = (f"selections are in "
-                      f"{Y_MEASURES[axes[sel_chart]]['label']}"
+                      f"{MEASURES[axes[sel_chart]]['label']}"
                       if sel_chart
                       else "you may choose to begin a selection in any chart")
             gate_txt = "rows through gates:\n" + " → ".join(
@@ -342,8 +336,7 @@ def _rgba(hex_color: str, alpha: float) -> str:
 
 
 def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
-                       heights: dict, y_vals: dict, token_mode: bool,
-                       n_pool: int) -> html.Div:
+                       heights: dict, y_vals: dict, n_pool: int) -> html.Div:
     """One left-panel section per selection: an arming header with the
     colored cursor-arrow (click to pick with this color), a color-coded
     Clear button, a clickable per-bin strip of the shared selection chart
@@ -426,6 +419,13 @@ def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
             kids.append(html.Div(
                 f"{len(members):,} requests matched ({pct:.1f}% of pool)",
                 style={**mono11, "color": "#222", "marginTop": "4px"}))
+            if row["member_seqs"]:
+                seqs = row["member_seqs"]
+                kids.append(html.Div(
+                    f"turns {min(seqs):,} … {max(seqs):,} contribute",
+                    title="First and last turn # (request sequence in its "
+                          "conversation) among the matched requests.",
+                    style=mono11))
             runs = bin_runs(s["bins"])
             run_lines = [
                 f"[{edge_label(e[a])}, {edge_label(e[b + 1])}): "
@@ -439,7 +439,7 @@ def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
                     continue
                 total = sum(y_vals[c][j] for j in members)
                 kids.append(html.Div(
-                    f"Σ {Y_MEASURES[axes[c]]['label']}: {fmt_count(total)}",
+                    f"Σ {MEASURES[axes[c]]['label']}: {fmt_count(total)}",
                     style=mono11))
     else:
         kids.append(html.Div(

@@ -169,23 +169,45 @@ def layout() -> html.Div:
                             "Replace per-request markers with the MEAN across "
                             "the selected conversations at each x position. A "
                             "conversation only contributes while it still has "
-                            "requests — once it ends it drops out of the "
+                            "requests - once it ends it drops out of the "
                             "stats, never padded with defaults.")],
                         style={"display": "inline"}),
                      "value": "grouped"},
-                    {"label": html.Span([
-                        " dotted min/max envelope",
-                        controls.info(
-                            "With grouped mode on, adds dotted lines tracking "
-                            "the lowest and highest single-conversation value "
-                            "at each x position.")],
-                        style={"display": "inline"}),
-                     "value": "envelope"},
                 ],
-                value=[], style={"fontSize": "11px", "marginTop": "6px"}),
+                value=["grouped"], style={"fontSize": "11px", "marginTop": "6px"}),
+            html.Div(["envelope:",
+                      controls.info(
+                          "Dotted band around the grouped mean. 10%/90% = the "
+                          "10th and 90th percentile single-conversation value "
+                          "at each x (robust to outliers); min-max = the "
+                          "extreme conversations; none = mean line only.")],
+                     style={"fontSize": "11px", "color": "#666",
+                            "marginTop": "4px", "display": "flex",
+                            "alignItems": "center"}),
+            dcc.RadioItems(
+                id="at-deep-envelope-radio",
+                options=[{"label": " 10%/90%", "value": "p1090"},
+                         {"label": " min-max", "value": "minmax"},
+                         {"label": " none", "value": "none"}],
+                value="p1090", inline=True,
+                labelStyle={"marginRight": "8px"},
+                style={"fontSize": "11px"}),
             html.Div("Grouped mode: at each x, conversations that have ended "
                      "drop out of mean/min/max — never padded with a default.",
                      style={"fontSize": "10px", "color": "#aaa", "marginTop": "2px"}),
+            html.Button("Export sweep points (JSON)",
+                        id="at-deep-sweep-btn", n_clicks=0,
+                        title="Sample the mean-of-conversations timeline into "
+                              "10 evenly spaced points (from zero to the last "
+                              "x where at least 2 conversations were sampled) "
+                              "and download them as JSON: average context "
+                              "tokens, new ISL, and expected OSL per point - "
+                              "no model or GPU, so model_charts can sweep "
+                              "those. Uses the checked conversations and the "
+                              "current x measure.",
+                        style={"fontSize": "11px", "marginTop": "8px",
+                               "padding": "3px 8px"}),
+            dcc.Download(id="at-deep-sweep-dl"),
             html.Div(["Magnifier: click a point to zoom that chart 5× around "
                       "it (the other charts gray points outside the window); "
                       "click a point on the magnified chart to inspect it in "
@@ -221,7 +243,12 @@ def layout() -> html.Div:
         ] + [
             # each chart takes exactly a third of the window height and the
             # responsive figures follow their container on window resize
-            html.Div(dcc.Graph(id=f"at-deep-y{i}-graph", config=GRAPH_CONFIG,
+            # doubleClick=autosize makes a double-click emit an AUTORANGE
+            # relayout (the default 'reset' restores the layout's own ranges
+            # - i.e. the magnified window - so the cancel never fired)
+            html.Div(dcc.Graph(id=f"at-deep-y{i}-graph",
+                               config={**GRAPH_CONFIG,
+                                       "doubleClick": "autosize"},
                                style={"height": "100%", "width": "100%"}),
                      style={"flex": "1 1 0%", "minHeight": "0"})
             for i in (1, 2, 3)

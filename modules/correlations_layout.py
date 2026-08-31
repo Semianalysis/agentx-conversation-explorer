@@ -13,21 +13,18 @@ from __future__ import annotations
 from dash import dcc, html
 
 from modules import controls
-from modules.correlations_data import (ALL_MEASURES, CHART_SLOTS, DEFAULT_AXES,
-                                       X_MEASURES, Y_MEASURES, initial_store)
+from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES, MEASURES,
+                                       initial_store)
 from modules.theme import F_SMALL, GRAPH_CONFIG
 
 _ROW_H = "24px"
 
 _AXIS_HEADER_INFO = {
-    "x": "Binning mode shared by all three charts: token count = each chart "
-         "bins its own y measure and counts requests; turn # / times = "
-         "shared positional bins where bars become per-bin SUMS of each "
-         "chart's measure.",
-    "y1": "Measure of the top chart.",
-    "y2": "Measure of the middle chart.",
-    "y3": "Measure of the bottom chart.",
+    "y1": "X measure of the top chart (its bars count requests per bin).",
+    "y2": "X measure of the middle chart.",
+    "y3": "X measure of the bottom chart.",
 }
+_COL_LABEL = {"y1": "x1", "y2": "x2", "y3": "x3"}  # slots keep internal ids
 
 
 def _axis_radio(id_: str, allowed: dict, default: str) -> dcc.RadioItems:
@@ -36,7 +33,7 @@ def _axis_radio(id_: str, allowed: dict, default: str) -> dcc.RadioItems:
     return dcc.RadioItems(
         id=id_,
         options=[{"label": "", "value": k, "disabled": k not in allowed}
-                 for k in ALL_MEASURES],
+                 for k in MEASURES],
         value=default,
         labelStyle={"display": "block", "height": _ROW_H, "margin": "0",
                     "textAlign": "center"},
@@ -59,18 +56,17 @@ def _measure_matrix() -> html.Div:
                 style={"fontSize": "11px", "height": _ROW_H,
                        "display": "flex", "alignItems": "center",
                        "color": "#333"})
-            for m in ALL_MEASURES.values()
+            for m in MEASURES.values()
         ],
         style={"flex": "1 1 auto", "minWidth": "0"},
     )
     axis_cols = [
-        html.Div([html.Div(name, title=_AXIS_HEADER_INFO[name],
+        html.Div([html.Div(_COL_LABEL[name], title=_AXIS_HEADER_INFO[name],
                            style=dict(header_style, cursor="help")),
-                  _axis_radio(f"at-corr-{name}-radio", allowed,
+                  _axis_radio(f"at-corr-{name}-radio", MEASURES,
                               DEFAULT_AXES[name])],
                  style={"flex": "0 0 30px"})
-        for name, allowed in (("x", X_MEASURES), ("y1", Y_MEASURES),
-                              ("y2", Y_MEASURES), ("y3", Y_MEASURES))
+        for name in CHART_SLOTS
     ]
     return html.Div(
         style={"display": "flex", "gap": "2px", "padding": "6px",
@@ -107,13 +103,12 @@ def layout() -> html.Div:
             value=["main", "subagent"],
             style={"fontSize": F_SMALL},
         ),
-        controls.label("Axes — one x mode, one measure per chart",
-                       info_text="Like the Deep-dive matrix: the x column "
-                                 "picks the shared binning mode, y1/y2/y3 "
-                                 "pick each chart's measure. Hover a measure "
-                                 "name for what it means. Changing any of "
-                                 "them re-bins the charts, so selections "
-                                 "reset."),
+        controls.label("Axes — one x measure per chart; y = request count",
+                       info_text="x1/x2/x3 pick each chart's x measure; every "
+                                 "chart is a histogram counting requests per "
+                                 "bin. Hover a measure name for what it "
+                                 "means. Changing a measure re-bins its "
+                                 "chart, so selections reset."),
         _measure_matrix(),
         controls.label("X scale",
                        info_text="log bins: geometric bin edges — right for "
@@ -128,6 +123,20 @@ def layout() -> html.Div:
                      {"label": " linear bins", "value": "linear"}],
             value="log", style={"fontSize": F_SMALL},
         ),
+        controls.label("Turn range (zoom)",
+                       info_text="Restrict every chart to requests whose "
+                                 "turn # (sequence in conversation) lies in "
+                                 "[first, last]. Leave empty for open ends; "
+                                 "press Enter (or click away) to apply. "
+                                 "Changing it re-bins, so selections reset."),
+        html.Div(style={"display": "flex", "gap": "6px"}, children=[
+            dcc.Input(id="at-corr-turnlo-input", type="number",
+                      placeholder="first turn", debounce=True,
+                      style={"width": "50%", "fontSize": F_SMALL}),
+            dcc.Input(id="at-corr-turnhi-input", type="number",
+                      placeholder="last turn", debounce=True,
+                      style={"width": "50%", "fontSize": F_SMALL}),
+        ]),
         html.Div("Click a bar in a histogram to add or remove from current "
                  "selection.",
                  style={"fontSize": "11px", "color": "#666", "marginTop": "14px",

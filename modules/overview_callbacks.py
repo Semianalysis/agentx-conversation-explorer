@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import logging
 
-from dash import ALL, Input, Output, State, callback_context, html
+from dash import ALL, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
-from modules import api_client, records
+from modules import api_client, hf_client, records
 from modules.controls import info
 from modules.explorer_data import apply_selection
 from modules.theme import F_SMALL, MONO, color_for, fmt_count
@@ -122,6 +122,9 @@ def _dataset_card(detail: dict, n_cached: int) -> html.Div:
             html.Div(style={"display": "flex", "alignItems": "center", "gap": "12px",
                             "marginTop": "12px"},
                      children=[
+                         html.Span("imported locally (internal source)",
+                                   style={"fontSize": F_SMALL, "color": "#a60"})
+                         if detail.get("source") == "hf" else
                          html.Button(
                              "Download traces" if n_cached < n_convs else "Re-check traces",
                              id={"type": "at-overview-download-btn", "slug": slug},
@@ -260,12 +263,134 @@ def register_overview_callbacks(app) -> None:
     )
     def render_cards(datasets, cache_counts):
         try:
+            # published datasets + any locally imported internal (HF) ones —
+            # local files are the user's own, so they always render
+            datasets = (datasets or []) + hf_client.local_hf_datasets()
             if not datasets:
                 return html.Div(
                     "No datasets imported yet — click 'Import / refresh datasets'.",
                     style={"color": "#777", "fontSize": "15px", "padding": "20px"})
             cache_counts = cache_counts or {}
-            return [_dataset_card(d, cache_counts.get(d["slug"], 0)) for d in datasets]
+            return [_dataset_card(
+                d, cache_counts.get(d["slug"],
+                                    len(api_client.cached_conversation_ids(d["slug"]))))
+                for d in datasets]
         except Exception:
             logger.exception("overview card render failed")
+            raise PreventUpdate
+
+    if not hf_client.internal_mode():
+        return  # internal-source callbacks reference components that only
+        # exist in internal mode — never registered in the public build
+
+    @app.callback(
+        Output("at-overview-hf-list", "children"),
+        Input("at-overview-hf-list-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def list_internal(_n):
+        try:
+            rows = hf_client.list_source_datasets()
+            if not rows:
+                return html.Div("no datasets visible for "
+                                f"{', '.join(hf_client.hf_sources())}",
+                                style={"fontSize": F_SMALL, "color": "#999"})
+            from dash import dcc
+            opts, rows_out = [], []
+            for d in rows:
+                badge = "PRIVATE" if d["private"] else "public"
+                extra = (f"  [{badge}, {d['updated']}"
+                         + (f", PARTIAL {d['imported_convs']} convs - will resume"
+                            if d.get("resumable")
+                            else (f", imported {d['imported_convs']} convs"
+                                  if d["imported_convs"] else ""))
+                         + "]")
+                if d["importable"]:
+                    opts.append({"label": " " + d["id"] + extra,
+                                 "value": d["id"]})
+                else:
+                    rows_out.append(html.Div(
+                        d["id"] + extra + "  - schema not supported",
+                        style={"fontSize": "12px", "fontFamily": MONO,
+                               "color": "#999", "padding": "1px 0 1px 22px"}))
+            return [dcc.Checklist(
+                id="at-overview-hf-select-cl", options=opts, value=[],
+                labelStyle={"display": "block", "fontFamily": MONO,
+                            "fontSize": "12px"})] + rows_out
+        except Exception:
+            logger.exception("internal dataset listing failed")
+            return html.Div("listing FAILED — see server log (is HF_TOKEN "
+                            "valid?)", style={"fontSize": F_SMALL, "color": "#a33"})
+
+    @app.callback(
+        Output("at-overview-hf-status", "children"),
+        Input("at-overview-hf-load-btn", "n_clicks"),
+        State("at-overview-hf-select-cl", "value"),
+        prevent_initial_call=True,
+    )
+    def start_load(n, selected):
+        try:
+            if not n:
+                raise PreventUpdate
+            hf_client.start_background_import(selected or [])
+            return f"loading {len(selected)} dataset(s) in the background..."
+        except PreventUpdate:
+            raise
+        except ValueError as e:
+            return str(e)
+        except Exception:
+            logger.exception("background import start failed")
+            return "start FAILED - see server log"
+
+    @app.callback(
+        Output("at-overview-hf-progress", "children"),
+        Output("at-overview-cache-store", "data", allow_duplicate=True),
+        Input("at-overview-hf-interval", "n_intervals"),
+        State("at-overview-cache-store", "data"),
+        prevent_initial_call=True,
+    )
+    def poll_progress(_n, cache_counts):
+        """1 Hz poll of the background importer: progress bar while running,
+        Done/FAILED message after; refreshes the cache-store once when a
+        finished import marks state dirty (dropdowns + cards update)."""
+        try:
+            p = hf_client.import_progress()
+            cache_update = no_update
+            if hf_client.consume_dirty():
+                records.clear_pools()
+                cache_counts = dict(cache_counts or {})
+                for d in hf_client.local_hf_datasets():
+                    cache_counts[d["slug"]] = d["conversation_count"]
+                cache_update = cache_counts
+            if p["running"]:
+                done, total = p["done_convs"], p["total_convs"]
+                pct = int(100 * done / total) if total else 0
+                bar = html.Div(
+                    style={"width": "420px", "height": "10px",
+                           "background": "#eee", "borderRadius": "4px"},
+                    children=html.Div(style={
+                        "width": f"{pct}%", "height": "100%",
+                        "background": "#2a7", "borderRadius": "4px"}))
+                label = (f"{p['current']}: {done}/{total or '?'} conversations"
+                         f" - {len(p['done_datasets'])} dataset(s) finished, "
+                         f"{len(p['queue'])} queued")
+                return html.Div([bar, html.Div(label, style={
+                    "fontSize": "12px", "fontFamily": MONO})]), cache_update
+            if p["error"]:
+                return html.Div("FAILED: " + p["error"],
+                                style={"fontSize": "12px", "color": "#a33"}), \
+                    cache_update
+            if p["done_datasets"]:
+                return html.Div(
+                    f"Done - imported {len(p['done_datasets'])} dataset(s): "
+                    + ", ".join(p["done_datasets"]),
+                    style={"fontSize": "12px", "color": "#2a7",
+                           "fontWeight": "600"}), cache_update
+            if cache_update is no_update:
+                raise PreventUpdate
+            return no_update, cache_update
+        except PreventUpdate:
+            raise
+        except Exception:
+            logger.exception("progress poll failed")
             raise PreventUpdate

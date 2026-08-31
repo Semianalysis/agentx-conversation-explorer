@@ -3,9 +3,8 @@ store, and membership matching."""
 import unittest
 
 from modules.binning import bin_index, make_bins
-from modules.correlations_data import (ALL_MEASURES, CHART_SLOTS,
-                                       DEFAULT_AXES, MAX_SELECTIONS,
-                                       X_MEASURES, Y_MEASURES, add_selection,
+from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES,
+                                       MAX_SELECTIONS, MEASURES, add_selection,
                                        assign_bin, assign_bin_range, bin_runs,
                                        clear_selection, initial_store,
                                        measure_values, member_mask,
@@ -15,32 +14,29 @@ from modules.figures import selection_to_bins
 
 class TestMeasureRegistry(unittest.TestCase):
     def test_defaults_and_shapes(self):
-        # startup defaults (user 2026-08-29): turn-count bins, token measures
-        self.assertEqual(DEFAULT_AXES["x"], "turn_number")
-        self.assertEqual(DEFAULT_AXES["y1"], "kv_cache_tokens")
-        self.assertEqual(DEFAULT_AXES["y2"], "new_input")
-        self.assertEqual(DEFAULT_AXES["y3"], "decode_output")
-        self.assertIn("turn_flops", Y_MEASURES)
-        self.assertIn("kv_cache_bytes", Y_MEASURES)
-        for key, m in ALL_MEASURES.items():
+        # per-chart X measures; y is always request count (user 2026-08-29)
+        self.assertEqual(DEFAULT_AXES,
+                         {"y1": "kv_cache_tokens", "y2": "new_input",
+                          "y3": "decode_output"})
+        for key in ("turn_number", "cumulative_time", "busy_time",
+                    "kv_cache_tokens", "new_input", "decode_output"):
+            self.assertIn(key, MEASURES)
+        # hardware guessing removed 2026-08-30: no FLOPs / byte measures
+        self.assertNotIn("turn_flops", MEASURES)
+        self.assertNotIn("kv_cache_bytes", MEASURES)
+        for key, m in MEASURES.items():
             self.assertTrue(m.get("info", "").strip(), f"{key} missing info")
-        self.assertEqual(Y_MEASURES["turn_flops"]["label"], "turn FLOPs")
-        self.assertEqual(Y_MEASURES["new_input"]["label"],
+        self.assertEqual(MEASURES["new_input"]["label"],
                          "uncached input (tokens)")
+
 
     def test_getters_read_enriched_rows(self):
         row = {"seq": 7, "start_s": 100.0, "busy_s": 40.0, "kv_bytes": 5e9,
-               "in_tokens": 2000, "uncached_tokens": 123, "out_tokens": 45,
-               "flops": 1e12}
-        self.assertEqual(measure_values([row], "kv_cache_tokens"), [2000])
+               "in_tokens": 2000, "cached_tokens": 1877,
+               "uncached_tokens": 123, "out_tokens": 45, "flops": 1e12}
+        self.assertEqual(measure_values([row], "kv_cache_tokens"), [1877])
         self.assertEqual(measure_values([row], "turn_number"), [7])
         self.assertEqual(measure_values([row], "busy_time"), [40.0])
-        self.assertEqual(measure_values([row], "kv_cache_bytes"), [5e9])
-        self.assertEqual(measure_values([row], "turn_flops"), [1e12])
-
-    def test_token_count_sentinel_has_no_getter(self):
-        with self.assertRaises(ValueError):
-            measure_values([{}], "token_count")
         with self.assertRaises(KeyError):
             measure_values([{}], "kv_cache_bites")
 
