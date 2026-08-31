@@ -40,7 +40,7 @@ def _internal_section() -> html.Div:
     from modules import hf_client
     from modules.controls import info
     if not hf_client.internal_mode():
-        return html.Div(id="at-overview-hf-list", style={"display": "none"})
+        return html.Div()  # public build: no internal components at all
     return html.Div(
         style={"marginTop": "22px", "borderTop": "2px dashed #ca8",
                "paddingTop": "10px"},
@@ -70,7 +70,15 @@ def _internal_section() -> html.Div:
                                                      "color": "#555"}),
                                      type="dot"),
                      ]),
-            html.Div(id="at-overview-hf-list"),
+            # the checklist exists in the INITIAL layout (empty) — the Load
+            # callback takes State from it, and Dash rejects callbacks that
+            # reference ids missing from the layout (no
+            # suppress_callback_exceptions here, deliberately)
+            dcc.Checklist(id="at-overview-hf-select-cl", options=[], value=[],
+                          labelStyle={"display": "block",
+                                      "fontFamily": "Consolas, monospace",
+                                      "fontSize": "12px"}),
+            html.Div(id="at-overview-hf-unsupported"),
             html.Div(style={"display": "flex", "alignItems": "center",
                             "gap": "12px", "marginTop": "8px"},
                      children=[

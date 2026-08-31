@@ -416,12 +416,17 @@ def _interval_inspector(per_request: list[dict], axes: dict,
         if hi_x == lo_x:
             hi_x = lo_x * 2
         log_ratio = math.log(hi_x / lo_x) / 60
-        b = max(0, min(int(math.log(max(interval_x, 1.0) / lo_x) / log_ratio),
-                       59))
+
+        def _bin(x: float) -> int:
+            # EXACTLY grouped_series' assignment (incl. max-x rows clamping
+            # into the last bin) — a rebuilt half-open range dropped them
+            return (0 if x <= lo_x
+                    else min(int(math.log(x / lo_x) / log_ratio), 59))
+
+        b = _bin(max(interval_x, 1.0))
         b_lo, b_hi = lo_x * math.exp(log_ratio * b), lo_x * math.exp(
             log_ratio * (b + 1))
-        rows = [p for i, p in enumerate(per_request)
-                if b_lo <= xs_all[i] < b_hi]
+        rows = [p for i, p in enumerate(per_request) if _bin(xs_all[i]) == b]
         label = f"[{edge_label(b_lo)}, {edge_label(b_hi)}) s"
     if not rows:
         return [_card("Interval inspector",
