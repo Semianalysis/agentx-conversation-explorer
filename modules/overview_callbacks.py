@@ -284,7 +284,9 @@ def register_overview_callbacks(app) -> None:
         # exist in internal mode — never registered in the public build
 
     @app.callback(
-        Output("at-overview-hf-list", "children"),
+        Output("at-overview-hf-select-cl", "options"),
+        Output("at-overview-hf-select-cl", "value"),
+        Output("at-overview-hf-unsupported", "children"),
         Input("at-overview-hf-list-btn", "n_clicks"),
         prevent_initial_call=True,
     )
@@ -292,10 +294,10 @@ def register_overview_callbacks(app) -> None:
         try:
             rows = hf_client.list_source_datasets()
             if not rows:
-                return html.Div("no datasets visible for "
-                                f"{', '.join(hf_client.hf_sources())}",
-                                style={"fontSize": F_SMALL, "color": "#999"})
-            from dash import dcc
+                return [], [], html.Div(
+                    "no datasets visible for "
+                    f"{', '.join(hf_client.hf_sources())}",
+                    style={"fontSize": F_SMALL, "color": "#999"})
             opts, rows_out = [], []
             for d in rows:
                 badge = "PRIVATE" if d["private"] else "public"
@@ -313,14 +315,12 @@ def register_overview_callbacks(app) -> None:
                         d["id"] + extra + "  - schema not supported",
                         style={"fontSize": "12px", "fontFamily": MONO,
                                "color": "#999", "padding": "1px 0 1px 22px"}))
-            return [dcc.Checklist(
-                id="at-overview-hf-select-cl", options=opts, value=[],
-                labelStyle={"display": "block", "fontFamily": MONO,
-                            "fontSize": "12px"})] + rows_out
+            return opts, [], rows_out
         except Exception:
             logger.exception("internal dataset listing failed")
-            return html.Div("listing FAILED — see server log (is HF_TOKEN "
-                            "valid?)", style={"fontSize": F_SMALL, "color": "#a33"})
+            return no_update, no_update, html.Div(
+                "listing FAILED — see server log (is HF_TOKEN valid?)",
+                style={"fontSize": F_SMALL, "color": "#a33"})
 
     @app.callback(
         Output("at-overview-hf-status", "children"),
