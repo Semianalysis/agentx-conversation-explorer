@@ -14,7 +14,7 @@ from dash import dash_table, dcc, html
 
 from modules import controls
 from modules.explorer_layout import TABLE_COLUMNS, TABLE_TOOLTIP_KWARGS
-from modules.measures import ALL_MEASURES, DEFAULT_AXES, X_MEASURES, Y_MEASURES
+from modules.measures import ALL_MEASURES, DEFAULT_AXES, X_MEASURES
 from modules.theme import F_SMALL, GRAPH_CONFIG, MONO
 
 _ROW_H = "26px"
@@ -22,9 +22,10 @@ _ROW_H = "26px"
 _AXIS_HEADER_INFO = {
     "x": "Horizontal axis of ALL THREE charts — shared measure AND locked to "
          "one identical range, so the charts align vertically.",
-    "y1": "Vertical axis of the top chart.",
-    "y2": "Vertical axis of the middle chart.",
-    "y3": "Vertical axis of the bottom chart.",
+    "y1": "Vertical axis of the top chart — in histogram mode, the ONE "
+          "measure it distributes.",
+    "y2": "Vertical axis of the middle chart (histogram mode: its measure).",
+    "y3": "Vertical axis of the bottom chart (histogram mode: its measure).",
 }
 
 
@@ -67,8 +68,11 @@ def _measure_matrix() -> html.Div:
                            style=dict(header_style, cursor="help")),
                   _axis_radio(f"at-deep-{name}-radio", allowed, DEFAULT_AXES[name])],
                  style={"flex": "0 0 34px"})
-        for name, allowed in (("x", X_MEASURES), ("y1", Y_MEASURES),
-                              ("y2", Y_MEASURES), ("y3", Y_MEASURES))
+        # y columns accept EVERY measure: histogram mode needs ordinals
+        # (turn #, conversation #) as a chart's single measure, and an
+        # ordinal y is a legitimate scatter in the other modes too
+        for name, allowed in (("x", X_MEASURES), ("y1", ALL_MEASURES),
+                              ("y2", ALL_MEASURES), ("y3", ALL_MEASURES))
     ]
     return html.Div(
         style={"display": "flex", "gap": "2px", "padding": "8px",
@@ -160,21 +164,29 @@ def layout() -> html.Div:
                         labelStyle={"marginRight": "10px"},
                         style={"fontSize": "11px"}),
                 ]),
-            dcc.Checklist(
-                id="at-deep-groupopts-cl",
-                options=[
-                    {"label": html.Span([
-                        " mean across conversations (grouped)",
-                        controls.info(
-                            "Replace per-request markers with the MEAN across "
-                            "the selected conversations at each x position. A "
-                            "conversation only contributes while it still has "
-                            "requests - once it ends it drops out of the "
-                            "stats, never padded with defaults.")],
-                        style={"display": "inline"}),
-                     "value": "grouped"},
-                ],
-                value=["grouped"], style={"fontSize": "11px", "marginTop": "6px"}),
+            html.Div(["chart mode",
+                      controls.info(
+                          "points = one marker per request (magnifier "
+                          "available). mean across conversations = the "
+                          "grouped mean line with its envelope. histogram = "
+                          "each chart becomes a distribution of ITS OWN "
+                          "measure: one measure per chart, y is the request "
+                          "count, continuous measures get 100 bins (an "
+                          "ordinal like turn # gets one bar per value) and "
+                          "the x-scale radio picks linear or log bin edges. "
+                          "The shared x measure and the magnifier don't "
+                          "apply in histogram mode.")],
+                     style={"fontSize": "11px", "color": "#666",
+                            "marginTop": "8px", "fontWeight": "600",
+                            "display": "flex", "alignItems": "center"}),
+            dcc.RadioItems(
+                id="at-deep-mode-radio",
+                options=[{"label": " points", "value": "points"},
+                         {"label": " mean across conversations",
+                          "value": "mean"},
+                         {"label": " histogram (one measure per chart)",
+                          "value": "histogram"}],
+                value="mean", style={"fontSize": "11px"}),
             html.Div(["envelope:",
                       controls.info(
                           "Dotted band around the grouped mean. 10%/90% = the "

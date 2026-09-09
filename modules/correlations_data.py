@@ -62,6 +62,15 @@ MEASURES = {
              "agent hand-offs) not already served from the prompt cache; "
              "this is what prefill actually computes.",
         getter=lambda p: p["uncached_tokens"]),
+    "idle_gap": dict(
+        label="idle before turn (s)",
+        info="Seconds between the end of the previous turn and the start of "
+             "this one — the conversation's think/tool/human wait. "
+             "Measured from the busy frontier, so a turn starting while a "
+             "parallel subagent still runs reads 0. A conversation's FIRST "
+             "turn has no previous turn: undefined, so it is left out of "
+             "this chart's counts entirely (never binned as zero).",
+        getter=lambda p: p["idle_gap_s"]),
     "decode_output": dict(
         label="decode output (tokens)",
         info="Tokens decoded (generated) by the request.",
@@ -204,7 +213,10 @@ def member_mask(values: list[float], edges: list[float], bins: list[int],
     if bad:
         raise ValueError(f"bin indices out of range 0..{n - 1}: {bad}")
     bset = set(bins)
-    return [bin_index(edges, v, log_x) in bset for v in values]
+    # None = the measure is undefined for that row (a conversation's first
+    # turn has no idle gap): it is a member of nothing, never bin 0
+    return [v is not None and bin_index(edges, v, log_x) in bset
+            for v in values]
 
 
 def bin_runs(bins: list[int]) -> list[tuple[int, int]]:

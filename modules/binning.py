@@ -62,6 +62,28 @@ def make_bins(values: list[float], n_bins: int, log_x: bool) -> list[float]:
     return edges
 
 
+def histogram_bins(values: list[float], log_x: bool,
+                   n_bins: int = 100) -> list[float]:
+    """Bin edges for a ONE-measure histogram.
+
+    Continuous measures get n_bins (default 100) edges over the value range.
+    An integral measure whose whole range fits in n_bins bars (ordinals like
+    turn # or conversation #) gets UNIT bins instead - one bar per value, so
+    the histogram is exact rather than smeared across fractional edges; the
+    log/linear choice then makes no difference and is ignored. Empty values
+    raise (callers gate on emptiness, as with make_bins).
+    """
+    if not values:
+        raise ValueError("histogram_bins on empty values - caller must gate")
+    if all(float(v).is_integer() for v in values):
+        lo, hi = int(min(values)), int(max(values))
+        if hi - lo + 1 <= n_bins:
+            edges = [float(lo + i) for i in range(hi - lo + 2)]
+            edges[-1] = edges[-1] * (1 + 1e-9) + 1e-9  # last edge inclusive
+            return edges
+    return make_bins(values, n_bins, log_x)
+
+
 def bin_index(edges: list[float], value: float, log_x: bool) -> int:
     """Bin index of one value under the same clamping rules as bin_counts:
     values below edge[0] land in bin 0 (log-x clamps sub-1 values), values

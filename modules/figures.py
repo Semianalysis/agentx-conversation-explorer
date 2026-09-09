@@ -55,6 +55,30 @@ def _stats_annotation(fig: go.Figure, values: list[float]) -> None:
     )
 
 
+def simple_histogram_figure(edges: list[float], counts: list[int],
+                            title: str, x_title: str, log_x: bool,
+                            stat_values: list[float] | None = None,
+                            color: str = "#1f77b4") -> go.Figure:
+    """One measure's distribution as index-bars (Deep-dive histogram mode):
+    uniform bars over bin INDEX with edge labels on the ticks, y = request
+    count. Autosizes to its flex container like the other deep-dive charts."""
+    n = len(edges) - 1
+    if len(counts) != n:
+        raise ValueError(f"{len(counts)} counts for {n} bins")
+    fig = go.Figure(go.Bar(
+        x=list(range(n)), y=counts, marker_color=color, marker_line_width=0,
+        hovertext=[f"[{edge_label(edges[i])}, {edge_label(edges[i + 1])}) - "
+                   f"{counts[i]:,} requests" for i in range(n)],
+        hoverinfo="text", name=""))
+    _apply_index_ticks(fig, edges, log_x, x_title)
+    fig.update_yaxes(title_text="requests", title_font_size=11)
+    fig.update_layout(**theme.base_layout(**theme.top_band_layout(title)))
+    fig.update_layout(bargap=0.05, showlegend=False)
+    if stat_values:
+        _stats_annotation(fig, stat_values)
+    return fig
+
+
 def multi_histogram_figure(
     edges: list[float],
     pool_heights: list[float],
