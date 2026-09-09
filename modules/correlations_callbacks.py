@@ -258,13 +258,28 @@ def register_correlations_callbacks(app) -> None:
                                      height=None) for c in CHART_SLOTS]
                 return (*figs, *no_cursor, [], "", gate_txt)
 
-            # each chart bins ITS OWN x measure; bars = request counts
+            # each chart bins ITS OWN x measure; bars = request counts.
+            # A measure may be undefined for some rows (a conversation's
+            # first turn has no idle gap): those rows keep their POSITION in
+            # bin_vals (member indices are shared across charts) but are
+            # excluded from edges, counts and overlays — never binned as 0.
             bin_vals = {c: measure_values(filtered, axes[c])
                         for c in CHART_SLOTS}
-            edges = {c: make_bins(bin_vals[c], _N_BINS, log_x)
+            defined = {c: [v for v in bin_vals[c] if v is not None]
+                       for c in CHART_SLOTS}
+            undefined_chart = next((c for c in CHART_SLOTS if not defined[c]),
+                                   None)
+            if undefined_chart is not None:
+                gate_txt = " -> ".join(f"{k}={v:,}" for k, v in gates.items())
+                figs = [empty_figure(
+                    MEASURES[axes[c]]["label"],
+                    f"no request has a defined value for this measure "
+                    f"({gate_txt})", height=None) for c in CHART_SLOTS]
+                return (*figs, *no_cursor, [], "", gate_txt)
+            edges = {c: make_bins(defined[c], _N_BINS, log_x)
                      for c in CHART_SLOTS}
             heights = {c: [float(n) for n in
-                           bin_counts(bin_vals[c], edges[c], log_x)]
+                           bin_counts(defined[c], edges[c], log_x)]
                        for c in CHART_SLOTS}
             y_vals = bin_vals  # inspector contribution sums read these
 
@@ -293,7 +308,8 @@ def register_correlations_callbacks(app) -> None:
                     for r in sel_rows:
                         if r["members"] is None:
                             continue
-                        mvals = [bin_vals[c][j] for j in r["members"]]
+                        mvals = [v for j in r["members"]
+                                 if (v := bin_vals[c][j]) is not None]
                         hts = [float(n) for n in
                                bin_counts(mvals, edges[c], log_x)]
                         overlays.append((hts, r["color"], r["name"]))
@@ -303,7 +319,7 @@ def register_correlations_callbacks(app) -> None:
                     edges[c], heights[c], title,
                     MEASURES[axes[c]]["label"], "requests", log_x,
                     own_marks=own, overlays=overlays,
-                    stat_values=bin_vals[c]))
+                    stat_values=defined[c]))
 
             # armed cursor: on the selection chart, or everywhere while
             # nothing is anchored yet
@@ -437,7 +453,8 @@ def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
             for c in CHART_SLOTS:  # contribution to each other chart
                 if c == sel_chart:
                     continue
-                total = sum(y_vals[c][j] for j in members)
+                total = sum(v for j in members
+                            if (v := y_vals[c][j]) is not None)
                 kids.append(html.Div(
                     f"Σ {MEASURES[axes[c]]['label']}: {fmt_count(total)}",
                     style=mono11))

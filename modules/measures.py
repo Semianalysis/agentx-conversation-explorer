@@ -70,6 +70,17 @@ Y_MEASURES = {
         label="decode output per turn (tokens)", scale="log", cumulative=False,
         info="Tokens decoded (generated) by this request.",
         getter=lambda p: _clamp1(p["out_tokens"])),
+    "idle_gap": dict(
+        label="idle before turn (s)", scale="log", cumulative=False,
+        info="Seconds between the end of the previous turn and the start of "
+             "this one — the conversation's think/tool/human wait. "
+             "Measured from the busy frontier, so a turn that starts while a "
+             "parallel subagent is still running reads 0 (no idle interval); "
+             "log axis shows 0 at the 1 s floor. The FIRST turn of a "
+             "conversation has no previous turn, so it is undefined and "
+             "simply not plotted — never faked as zero.",
+        getter=lambda p: (None if p["idle_gap_s"] is None
+                          else _clamp1(p["idle_gap_s"]))),
     "cumulative_output_tokens": dict(
         label="cumulative decode output (tokens, per conv)", scale="log",
         cumulative=True,
