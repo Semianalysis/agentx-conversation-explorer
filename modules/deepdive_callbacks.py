@@ -17,7 +17,7 @@ from modules.deepdive_data import (aggregate_selection, grouped_series,
                                    sweep_points, zoom_member_uids)
 from modules.explorer_data import build_conversation_table
 from modules.figures import empty_figure
-from modules.measures import (ALL_MEASURES, X_MEASURES, Y_MEASURES, axis_units,
+from modules.measures import (ALL_MEASURES, X_MEASURES, axis_units,
                               measure_series, shared_axis_range, zoom_window)
 from modules.theme import (F_SMALL, MONO, ROLE_COLORS, color_for,
                            fmt_count)
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 _MAX_PER_CONV_LINES = 12  # above this, cumulative measures fall back to markers
 _SLOTS = ("y1", "y2", "y3")
 _ZOOM_FACTOR = 5.0
+_HIST_BINS = 100
 _GRAY = "rgba(160,160,160,0.25)"
 
 
@@ -37,14 +38,14 @@ def register_deepdive_callbacks(app) -> None:
         Input("at-deep-y1-radio", "value"),
         Input("at-deep-y2-radio", "value"),
         Input("at-deep-y3-radio", "value"),
-        Input("at-deep-groupopts-cl", "value"),
+        Input("at-deep-mode-radio", "value"),
         Input("at-deep-xscale-radio", "value"),
         Input("at-deep-envelope-radio", "value"),
     )
-    def coalesce_axes(x, y1, y2, y3, groupopts, xscale, envelope):
-        groupopts = groupopts or []
+    def coalesce_axes(x, y1, y2, y3, mode, xscale, envelope):
+        mode = mode or "mean"
         return {"x": x, "y1": y1, "y2": y2, "y3": y3,
-                "grouped": "grouped" in groupopts,
+                "mode": mode, "grouped": mode == "mean",
                 "envelope": envelope or "p1090",
                 "xscale": xscale or "auto"}
 
@@ -94,6 +95,8 @@ def register_deepdive_callbacks(app) -> None:
                 raise PreventUpdate
             pt = pts[0]
             axes = args[6] or {}
+            if axes.get("mode") == "histogram":
+                raise PreventUpdate  # bars aren't points: nothing to inspect
             if axes.get("grouped"):
                 # grouped mode has no magnifier; a click inspects the x
                 # interval (the mean line only has points at occupied bins,
@@ -154,6 +157,14 @@ def register_deepdive_callbacks(app) -> None:
             xscale = axes.get("xscale", "auto")
             x_scale_eff = (X_MEASURES[axes["x"]]["scale"] if xscale == "auto"
                            else xscale)
+
+            if axes.get("mode") == "histogram":
+                # one measure per chart, y = request count; each chart bins
+                # ITS OWN measure, so no shared x range and no magnifier
+                figs = [_histogram_figure(agg["per_request"], axes[slot],
+                                          xscale)
+                        for slot in _SLOTS]
+                return (*figs, _summary_panel(arch, cfg, agg, all_selected))
             # One locked x window for all three charts (grouped-mode bin mids
             # sit at most half a bin inside the data extremes — the 2% pad
             # covers that, so the same range fits every chart mode).
@@ -169,8 +180,11 @@ def register_deepdive_callbacks(app) -> None:
             member_uids: set | None = None
             if zoom:
                 z_y_key = axes[zoom["chart"]]
-                y_range = shared_axis_range(
-                    measure_series(agg["per_request"], z_y_key), "log")
+                y_vals = [v for v in measure_series(agg["per_request"], z_y_key)
+                          if v is not None]
+                if not y_vals:
+                    raise PreventUpdate  # nothing to magnify on that measure
+                y_range = shared_axis_range(y_vals, "log")
                 window_x = zoom_window(axis_units(max(zoom["cx"], 1e-12),
                                                   x_scale_eff),
                                        x_range, _ZOOM_FACTOR)
@@ -267,11 +281,14 @@ def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
     member set: on a NON-magnified chart, requests outside it draw gray
     (marker mode only — line modes aren't grayed per point). magnified marks
     the title."""
-    xm, ym = dict(X_MEASURES[x_key]), Y_MEASURES[y_key]
+    xm, ym = dict(X_MEASURES[x_key]), ALL_MEASURES[y_key]
     if x_scale:
         if x_scale not in ("linear", "log"):
             raise ValueError(f"unknown x_scale override {x_scale!r}")
         xm["scale"] = x_scale
+    # rows whose y measure is undefined (a conversation's first turn has no
+    # idle gap) are dropped here, once, for every mode below
+    per_req = [p for p in per_req if ym["getter"](p) is not None]
     fig = go.Figure()
     title = ym["label"] + (" — magnified 5×" if magnified else "")
     # n_convs == 1 still draws the grouped line (the mean of one
@@ -350,6 +367,27 @@ def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
             if inside:
                 _marker_trace(inside, color, role, 0.6)
     return _finish_measure_figure(fig, title, xm, ym)
+
+
+def _histogram_figure(per_req: list[dict], measure_key: str,
+                      xscale: str) -> go.Figure:
+    """One measure's distribution over the aggregated requests: 100 bins for
+    a continuous measure, one bar per value for a small-range ordinal, y =
+    request count. xscale 'auto' follows the measure's natural scale."""
+    from modules.binning import bin_counts, histogram_bins
+    from modules.figures import simple_histogram_figure
+
+    m = ALL_MEASURES[measure_key]
+    values = [v for v in (m["getter"](p) for p in per_req) if v is not None]
+    if not values:
+        return empty_figure(m["label"], "no requests with a defined value "
+                            "for this measure", height=None)
+    log_x = (m["scale"] == "log") if xscale == "auto" else (xscale == "log")
+    edges = histogram_bins(values, log_x, n_bins=_HIST_BINS)
+    counts = bin_counts(values, edges, log_x)
+    title = f"{m['label']} — distribution of {len(values):,} requests"
+    return simple_histogram_figure(edges, counts, title, m["label"], log_x,
+                                   stat_values=values)
 
 
 def _finish_measure_figure(fig: go.Figure, title: str, xm: dict, ym: dict) -> go.Figure:
@@ -447,8 +485,14 @@ def _interval_inspector(per_request: list[dict], axes: dict,
                "alignItems": "center", "marginBottom": "4px"})]
     _PER_TURN = {"cumulative_output_tokens": "new_output_tokens"}
     for slot in _SLOTS:
-        ym = Y_MEASURES[_PER_TURN.get(axes[slot], axes[slot])]
-        values = [ym["getter"](p) for p in rows]
+        ym = ALL_MEASURES[_PER_TURN.get(axes[slot], axes[slot])]
+        values = [v for v in (ym["getter"](p) for p in rows) if v is not None]
+        if not values:
+            kids.append(html.Div(f"{ym['label']}: undefined for every request "
+                                 "in this interval",
+                                 style={"fontFamily": MONO, "fontSize": "11px",
+                                        "color": "#999"}))
+            continue
         edges = make_bins(values, 15, log_x=True)
         counts = bin_counts(values, edges, log_x=True)
         fig = go.Figure(go.Bar(

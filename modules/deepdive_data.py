@@ -24,7 +24,8 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
     measure registry: 'ord' (conversation ordinal), 'cid', 'seq' (1-based
     request sequence within the conversation, time order), 'cum_flops'
     (running FLOPs within the conversation), 'kv_bytes' (KV-cache bytes of the CACHED
-    prefix at the turn's start, under the assumptions), 'busy_s' (ACTIVE seconds elapsed at the
+    prefix at the turn's start, under the assumptions), 'idle_gap_s' (idle seconds before the turn;
+    None for a conversation's first request), 'busy_s' (ACTIVE seconds at the
     request's start: the measure of the union of all earlier [start, end]
     request intervals in the conversation — idle gaps contribute nothing).
 
@@ -61,8 +62,18 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
         cum_out = 0
         # per_request is start-sorted, so busy_offsets applies directly
         busy = busy_offsets(result["per_request"])
+        frontier_end_s = None  # max end_s of every earlier request
         for seq, (p, busy_s) in enumerate(zip(result["per_request"], busy),
                                           start=1):
+            # idle seconds before this turn: from the busy frontier (the last
+            # moment anything in this conversation was running) to this start.
+            # None for the FIRST request - there is no previous turn, so the
+            # measure is undefined and consumers drop the point. Overlapping
+            # requests (parallel subagents) give 0.0: no idle interval.
+            idle_gap_s = (None if frontier_end_s is None
+                          else max(0.0, p["start_s"] - frontier_end_s))
+            frontier_end_s = (p["end_s"] if frontier_end_s is None
+                              else max(frontier_end_s, p["end_s"]))
             cum_flops += p["flops"]
             cum_out += p["out_tokens"]
             per_request.append({
@@ -73,6 +84,7 @@ def aggregate_selection(pool: list[dict], conv_ids: list[str], arch: dict,
                 # distinct from the uncached input the turn then prefills
                 "kv_bytes": p["cached_tokens"] * kv_bytes_per_token,
                 "busy_s": busy_s,
+                "idle_gap_s": idle_gap_s,
             })
     return {"totals": totals, "per_request": per_request,
             "wall_s_sum": wall_s_sum, "n_convs": len(conv_ids)}
@@ -137,6 +149,8 @@ def zoom_member_uids(per_request: list[dict], x_key: str, y_key: str,
     yg = ALL_MEASURES[y_key]["getter"]
     out = set()
     for p in per_request:
+        if yg(p) is None:      # undefined measure (e.g. first turn's idle
+            continue           # gap) is not inside any window
         ax = axis_units(xg(p), x_scale)
         ay = axis_units(yg(p), "log")
         if window_x[0] <= ax <= window_x[1] and window_y[0] <= ay <= window_y[1]:
@@ -170,6 +184,11 @@ def grouped_series(per_request: list[dict], x_key: str, y_key: str,
         raise ValueError("grouped_series on empty per_request")
     xg = ALL_MEASURES[x_key]["getter"]
     yg = ALL_MEASURES[y_key]["getter"]
+    # rows whose y measure is undefined (first turn's idle gap) contribute
+    # nothing to the mean — dropped, never defaulted
+    per_request = [p for p in per_request if yg(p) is not None]
+    if not per_request:
+        raise ValueError(f"grouped_series: no rows with a defined {y_key}")
 
     # per-conversation value at each x position (mean when several land there)
     acc: dict[float, dict[str, list[float]]] = {}

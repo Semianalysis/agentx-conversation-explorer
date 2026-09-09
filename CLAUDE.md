@@ -90,6 +90,17 @@ Independent project — it imitates the InferenceX Explorer tab of
   columns remain). Dataset + assumptions come from Explorer ("any" → DEFAULT_ASSUMPTIONS
   in arch.py).
 - Purpose: explore the shape of real agent traces (tokens, turns, timing).
+- bld 35: measure "idle before turn (s)" on BOTH tabs = seconds from the busy
+  frontier (end of the previous turn / last parallel subagent) to this turn's
+  start; a conversation's FIRST turn is UNDEFINED (idle_gap_s None) and is
+  dropped by every consumer - never faked as 0 (overlapping turns do read a
+  true 0). Deep-dive chart mode is now a radio: points | mean across
+  conversations (default) | histogram. Histogram mode gives each chart a
+  distribution of ITS OWN slot measure (y columns therefore accept EVERY
+  measure, ordinals included), y = request count, 100 bins for a continuous
+  measure and one bar per value for an ordinal whose range fits
+  (binning.histogram_bins); the x-scale radio picks linear or log bin edges;
+  the shared x measure, magnifier and click-inspector do not apply there.
 - HARDWARE GUESSING REMOVED (user, 2026-08-30, bld 33): no FLOPs, byte, memory-
   movement, network, or implied-GPU numbers anywhere in the UI — we don't know
   proprietary models' weights/token or data movement. Deep-dive keeps ONLY the
