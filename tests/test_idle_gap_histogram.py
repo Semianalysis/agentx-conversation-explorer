@@ -121,3 +121,38 @@ class TestSimpleHistogramFigure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAllUndefinedMeasureDiagnoses(unittest.TestCase):
+    """Bugbot: every row's y undefined (all conversations single-turn ->
+    no idle gaps) must DIAGNOSE, not raise out of grouped_series into a
+    PreventUpdate that freezes all three charts, and not draw a silent
+    blank plot in marker mode."""
+
+    def setUp(self):
+        from modules.deepdive_callbacks import _measure_figure
+        self.fig_for = _measure_figure
+        pool = [_rec("cA", 0, 0.0, 1.0), _rec("cB", 0, 0.0, 1.0)]
+        self.rows = _agg(pool, ["cA", "cB"], {"cA": 1, "cB": 2})["per_request"]
+        self.assertEqual([r["idle_gap_s"] for r in self.rows], [None, None])
+
+    def _assert_diagnosed(self, fig):
+        self.assertEqual(len(fig.data), 0)                  # nothing plotted
+        self.assertEqual(len(fig.layout.annotations), 1)    # reason shown
+        text = fig.layout.annotations[0].text
+        self.assertIn("no value defined", text)
+        self.assertIn("2", text)                            # rows considered
+
+    def test_grouped_mode_diagnoses_instead_of_raising(self):
+        self._assert_diagnosed(self.fig_for(
+            self.rows, "busy_time", "idle_gap", n_convs=2, grouped=True,
+            envelope="p1090"))
+
+    def test_points_mode_diagnoses_instead_of_blank(self):
+        self._assert_diagnosed(self.fig_for(
+            self.rows, "busy_time", "idle_gap", n_convs=2, grouped=False))
+
+    def test_defined_measure_still_plots(self):
+        fig = self.fig_for(self.rows, "busy_time", "context_tokens",
+                           n_convs=2, grouped=True, envelope="p1090")
+        self.assertGreater(len(fig.data), 0)
