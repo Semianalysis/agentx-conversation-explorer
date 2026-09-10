@@ -182,18 +182,20 @@ def register_deepdive_callbacks(app) -> None:
                 z_y_key = axes[zoom["chart"]]
                 y_vals = [v for v in measure_series(agg["per_request"], z_y_key)
                           if v is not None]
-                if not y_vals:
-                    raise PreventUpdate  # nothing to magnify on that measure
-                y_range = shared_axis_range(y_vals, "log")
-                window_x = zoom_window(axis_units(max(zoom["cx"], 1e-12),
-                                                  x_scale_eff),
-                                       x_range, _ZOOM_FACTOR)
-                window_y = zoom_window(axis_units(max(zoom["cy"], 1e-12),
-                                                  "log"),
-                                       y_range, _ZOOM_FACTOR)
-                member_uids = zoom_member_uids(
-                    agg["per_request"], axes["x"], z_y_key,
-                    window_x, window_y, x_scale_eff)
+                y_range = shared_axis_range(y_vals, "log") if y_vals else None
+                if y_range is None:
+                    zoom = None  # that measure plots nothing: no magnifier,
+                    # and the charts render normally instead of freezing
+                else:
+                    window_x = zoom_window(axis_units(max(zoom["cx"], 1e-12),
+                                                      x_scale_eff),
+                                           x_range, _ZOOM_FACTOR)
+                    window_y = zoom_window(axis_units(max(zoom["cy"], 1e-12),
+                                                      "log"),
+                                           y_range, _ZOOM_FACTOR)
+                    member_uids = zoom_member_uids(
+                        agg["per_request"], axes["x"], z_y_key,
+                        window_x, window_y, x_scale_eff)
 
             figs = []
             for slot in _SLOTS:
@@ -288,7 +290,17 @@ def _measure_figure(per_req: list[dict], x_key: str, y_key: str, n_convs: int,
         xm["scale"] = x_scale
     # rows whose y measure is undefined (a conversation's first turn has no
     # idle gap) are dropped here, once, for every mode below
+    n_before = len(per_req)
     per_req = [p for p in per_req if ym["getter"](p) is not None]
+    if not per_req:
+        # every row dropped: say WHICH gate ate them instead of raising out
+        # of grouped_series (a silent PreventUpdate froze all three charts)
+        # or drawing an unexplained empty plot in marker mode
+        return empty_figure(
+            ym["label"],
+            f"no value defined for this measure in any of the {n_before:,} "
+            f"requests (a conversation's first turn has no preceding gap)",
+            height=None)
     fig = go.Figure()
     title = ym["label"] + (" — magnified 5×" if magnified else "")
     # n_convs == 1 still draws the grouped line (the mean of one
