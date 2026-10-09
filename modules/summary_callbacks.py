@@ -10,7 +10,7 @@ import base64
 import tempfile
 from pathlib import Path
 
-from modules import api_client, hf_client, openclaw_import, records
+from modules import api_client, controls, hf_client, records
 from modules.controls import info
 from modules.explorer_data import apply_selection
 from modules.theme import F_SMALL, MONO, color_for, fmt_count
@@ -131,7 +131,7 @@ def _dataset_card(detail: dict, n_cached: int) -> html.Div:
                          if detail.get("source") == "hf" else
                          html.Button(
                              "Download traces" if n_cached < n_convs else "Re-check traces",
-                             id={"type": "at-overview-download-btn", "slug": slug},
+                             id={"type": "at-summary-download-btn", "slug": slug},
                              n_clicks=0,
                              title="Download every conversation trace of this "
                                    "dataset into the local data/ cache "
@@ -148,11 +148,37 @@ def _dataset_card(detail: dict, n_cached: int) -> html.Div:
     )
 
 
-def register_overview_callbacks(app) -> None:
+def _preview_card(detail: dict, where: str) -> html.Div:
+    """Stats for a dataset we might want: its own summary, plus whether its
+    traces are already on this machine."""
+    s = detail.get("summary") or {}
+    n_cached = len(api_client.cached_conversation_ids(detail["slug"]))
+    n_convs = detail.get("conversation_count", 0)
+    cached_pct = s.get("cachedPct")
+    rows = [
+        ("Where", where),
+        ("Conversations", f"{n_convs:,}"),
+        ("Cached here", f"{n_cached}/{n_convs}" if n_convs else str(n_cached)),
+        ("Main-agent turns", f"{s.get('mainTurns', 0):,}"),
+        ("Subagent turns", f"{s.get('subagentTurns', 0):,}"),
+        ("Input tokens", fmt_count(s.get("totalIn", 0))),
+        ("Output tokens", fmt_count(s.get("totalOut", 0))),
+        ("Cached fraction",
+         f"{cached_pct * 100:.2f}%" if cached_pct is not None else "n/a"),
+    ]
+    note = ("" if n_cached else
+            " — no traces cached yet: load it, then use its card's "
+            "Download traces button")
+    return controls.card(f"Preview — {detail.get('label', detail['slug'])}",
+                         rows,
+                         info_text="The dataset's own reported stats" + note)
+
+
+def register_summary_callbacks(app) -> None:
     @app.callback(
-        Output("at-overview-datasets-store", "data"),
-        Output("at-overview-import-status", "children"),
-        Input("at-overview-import-btn", "n_clicks"),
+        Output("at-summary-datasets-store", "data"),
+        Output("at-summary-import-status", "children"),
+        Input("at-summary-import-btn", "n_clicks"),
         prevent_initial_call=True,
     )
     def import_datasets(n_clicks):
@@ -174,9 +200,9 @@ def register_overview_callbacks(app) -> None:
             return [], "Import FAILED — see server log"
 
     @app.callback(
-        Output("at-overview-cache-store", "data"),
-        Input({"type": "at-overview-download-btn", "slug": ALL}, "n_clicks"),
-        State("at-overview-datasets-store", "data"),
+        Output("at-summary-cache-store", "data"),
+        Input({"type": "at-summary-download-btn", "slug": ALL}, "n_clicks"),
+        State("at-summary-datasets-store", "data"),
         prevent_initial_call=True,
     )
     def download_traces(n_clicks_list, datasets):
@@ -200,7 +226,7 @@ def register_overview_callbacks(app) -> None:
             raise PreventUpdate
 
     @app.callback(
-        Output("at-overview-selection-summary", "children"),
+        Output("at-summary-selection-summary", "children"),
         Input("at-explorer-selection-store", "data"),
     )
     def render_selection_summary(selection):
@@ -261,89 +287,103 @@ def register_overview_callbacks(app) -> None:
             raise PreventUpdate
 
     @app.callback(
-        Output("at-overview-cards", "children"),
-        Input("at-overview-datasets-store", "data"),
-        Input("at-overview-cache-store", "data"),
+        Output("at-summary-cards", "children"),
+        Output("at-summary-loaded-title", "children"),
+        Input("at-summary-datasets-store", "data"),
+        Input("at-summary-cache-store", "data"),
+        Input("at-sources-store", "data"),
     )
-    def render_cards(datasets, cache_counts):
+    def render_cards(datasets, cache_counts, session_sources):
+        """Summary analyses the datasets this session has LOADED: published
+        ones whose traces are cached, plus local imports the user brought
+        in. A private import nobody loaded is not reported here."""
         try:
-            # published datasets + any locally imported internal (HF) ones —
-            # local files are the user's own, so they always render
-            datasets = (datasets or []) + hf_client.local_hf_datasets()
+            from modules import sources as src
+            wanted_local = set(src.slugs(session_sources or [], src.LOCAL))
+            local = [d for d in hf_client.local_hf_datasets()
+                     if d["slug"] in wanted_local]
+            website = [d for d in (datasets or [])
+                       if api_client.cached_conversation_ids(d["slug"])]
+            datasets = website + local
+            title = (f"Loaded datasets ({len(datasets)})" if datasets
+                     else "Loaded datasets")
             if not datasets:
                 return html.Div(
-                    "No datasets imported yet — click 'Import / refresh datasets'.",
-                    style={"color": "#777", "fontSize": "15px", "padding": "20px"})
+                    "Nothing loaded yet — find a dataset above, or load a "
+                    "local export from the Dataset panel on Explorer.",
+                    style={"color": "#777", "fontSize": "15px",
+                           "padding": "20px"}), title
             cache_counts = cache_counts or {}
             return [_dataset_card(
                 d, cache_counts.get(d["slug"],
                                     len(api_client.cached_conversation_ids(d["slug"]))))
-                for d in datasets]
+                for d in datasets], title
         except Exception:
             logger.exception("overview card render failed")
             raise PreventUpdate
 
     @app.callback(
-        Output("at-overview-cache-store", "data", allow_duplicate=True),
-        Output("at-overview-local-status", "children"),
-        Input("at-overview-upload", "contents"),
-        Input("at-overview-import-path-btn", "n_clicks"),
-        State("at-overview-upload", "filename"),
-        State("at-overview-import-path", "value"),
-        State("at-overview-cache-store", "data"),
+        Output("at-summary-found-list", "children"),
+        Output("at-summary-found-store", "data"),
+        Output("at-summary-preview", "children"),
+        Input("at-summary-search-btn", "n_clicks"),
+        Input("at-summary-search-input", "value"),
+        Input("at-summary-scope-radio", "value"),
         prevent_initial_call=True,
     )
-    def import_local(contents, _n, filename, path_value, cache_counts):
-        """Import a trace export chosen with the file dialog (uploaded into
-        a temp file) or named by a path on this machine. Everything stays in
-        the local, gitignored cache."""
-        trig = callback_context.triggered_id
-        tmp = None
+    def find_datasets(_n, query, scope):
+        """Search published datasets or local imports by name and preview
+        the best match's own stats. Previewing reads dataset cards only - it
+        never loads traces."""
         try:
-            if trig == "at-overview-upload":
-                if not contents:
-                    raise PreventUpdate
-                header, _, b64 = contents.partition(",")
-                tmp = Path(tempfile.gettempdir()) / (filename or "export.zip")
-                tmp.write_bytes(base64.b64decode(b64))
-                source, label = tmp, (filename or tmp.name)
+            q = (query or "").strip().lower()
+            if scope == "local":
+                pool = hf_client.local_hf_datasets()
+                where = "imported on this machine"
             else:
-                if not path_value or not str(path_value).strip():
-                    return no_update, "type a path, or use the file dialog"
-                source = Path(str(path_value).strip().strip('"'))
-                if not source.exists():
-                    return no_update, f"no such file or folder: {source}"
-                label = source.name
-            detail = openclaw_import.import_openclaw(source)
-            records.clear_pools()
-            cache_counts = dict(cache_counts or {})
-            cache_counts[detail["slug"]] = detail["conversation_count"]
-            s = detail["summary"]
-            msg = (f"imported {label}: {detail['conversation_count']} "
-                   f"conversations, "
-                   f"{s['mainTurns'] + s['subagentTurns']:,} model calls"
-                   + (f", {detail['skipped_rows']} rows skipped"
-                      if detail.get("skipped_rows") else "")
-                   + " - pick it in the dataset dropdown")
-            return cache_counts, msg
-        except PreventUpdate:
-            raise
-        except Exception as e:
-            logger.exception("local import failed")
-            return no_update, f"import FAILED: {e}"
-        finally:
-            if tmp is not None and tmp.exists():
-                tmp.unlink(missing_ok=True)
+                pool = list(api_client.fetch_datasets())
+                where = "published on the AgentX site"
+            hits = [d for d in pool
+                    if q in d["slug"].lower()
+                    or q in str(d.get("label", "")).lower()] if q else pool
+            if not hits:
+                return (html.Div(f"nothing {where} matches {query!r}",
+                                 style={"fontSize": F_SMALL, "color": "#a60"}),
+                        None, "")
+            rows = [html.Div(
+                f"{d.get('label', d['slug'])}  —  {d['slug']}  "
+                f"({d.get('conversation_count', '?')} conversations)",
+                style={"fontSize": "12px", "fontFamily": MONO,
+                       "color": "#333" if i == 0 else "#888"})
+                for i, d in enumerate(hits[:8])]
+            if len(hits) > 8:
+                rows.append(html.Div(f"… and {len(hits) - 8} more",
+                                     style={"fontSize": "11px",
+                                            "color": "#999"}))
+            best = hits[0]
+            detail = best
+            if scope == "online":
+                try:
+                    detail = api_client.fetch_dataset_detail(best["slug"])
+                except Exception:
+                    logger.exception("preview detail fetch failed")
+            return (html.Div(rows, style={"margin": "6px 0"}),
+                    {"detail": detail}, _preview_card(detail, where))
+        except Exception:
+            logger.exception("dataset search failed")
+            return (html.Div("search FAILED — see server log",
+                             style={"fontSize": F_SMALL, "color": "#a33"}),
+                    None, "")
 
     if not hf_client.internal_mode():
         return  # internal-source callbacks reference components that only
         # exist in internal mode — never registered in the public build
 
     @app.callback(
-        Output("at-overview-hf-select-cl", "options"),
-        Output("at-overview-hf-select-cl", "value"),
-        Output("at-overview-hf-unsupported", "children"),
-        Input("at-overview-hf-list-btn", "n_clicks"),
+        Output("at-summary-hf-select-cl", "options"),
+        Output("at-summary-hf-select-cl", "value"),
+        Output("at-summary-hf-unsupported", "children"),
+        Input("at-summary-hf-list-btn", "n_clicks"),
         prevent_initial_call=True,
     )
     def list_internal(_n):
@@ -379,9 +419,9 @@ def register_overview_callbacks(app) -> None:
                 style={"fontSize": F_SMALL, "color": "#a33"})
 
     @app.callback(
-        Output("at-overview-hf-status", "children"),
-        Input("at-overview-hf-load-btn", "n_clicks"),
-        State("at-overview-hf-select-cl", "value"),
+        Output("at-summary-hf-status", "children"),
+        Input("at-summary-hf-load-btn", "n_clicks"),
+        State("at-summary-hf-select-cl", "value"),
         prevent_initial_call=True,
     )
     def start_load(n, selected):
@@ -399,10 +439,10 @@ def register_overview_callbacks(app) -> None:
             return "start FAILED - see server log"
 
     @app.callback(
-        Output("at-overview-hf-progress", "children"),
-        Output("at-overview-cache-store", "data", allow_duplicate=True),
-        Input("at-overview-hf-interval", "n_intervals"),
-        State("at-overview-cache-store", "data"),
+        Output("at-summary-hf-progress", "children"),
+        Output("at-summary-cache-store", "data", allow_duplicate=True),
+        Input("at-summary-hf-interval", "n_intervals"),
+        State("at-summary-cache-store", "data"),
         prevent_initial_call=True,
     )
     def poll_progress(_n, cache_counts):

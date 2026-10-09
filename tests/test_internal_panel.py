@@ -25,9 +25,9 @@ class TestInternalPanelLayout(unittest.TestCase):
     def _layout_ids(self) -> set:
         import importlib
 
-        from modules import overview_layout
-        importlib.reload(overview_layout)
-        return _find_ids(overview_layout._internal_section(), set())
+        from modules import summary_layout
+        importlib.reload(summary_layout)
+        return _find_ids(summary_layout._internal_section(), set())
 
     def test_internal_mode_has_static_checklist(self):
         os.environ["AGENTX_INTERNAL"] = "1"
@@ -35,9 +35,9 @@ class TestInternalPanelLayout(unittest.TestCase):
             ids = self._layout_ids()
         finally:
             del os.environ["AGENTX_INTERNAL"]
-        for needed in ("at-overview-hf-select-cl", "at-overview-hf-load-btn",
-                       "at-overview-hf-unsupported", "at-overview-hf-list-btn",
-                       "at-overview-hf-progress", "at-overview-hf-interval"):
+        for needed in ("at-summary-hf-select-cl", "at-summary-hf-load-btn",
+                       "at-summary-hf-unsupported", "at-summary-hf-list-btn",
+                       "at-summary-hf-progress", "at-summary-hf-interval"):
             self.assertIn(needed, ids)
 
     def test_public_mode_has_no_internal_components(self):
