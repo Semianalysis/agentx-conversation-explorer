@@ -15,10 +15,11 @@ Mapping (one conversation per agent lane — `session_id`):
 The in == cached + uncached invariant holds by construction, so the records
 loader accepts these files exactly like AgentX ones.
 
-NOT imported, because this app has no concept of them: tool calls (names,
-categories, durations in tools.csv), per-run cost, compaction counts. The
-pauses between turns ARE preserved as timing, so the idle-before-turn
-measure works; what happens inside a pause is not representable here.
+tools.csv, when present, is imported as ACTIVITY INTERVALS (category,
+lane-relative start/end) alongside the turns. They are not requests - no
+tab treats them as model calls - but Pause Analytics uses them to say what
+was running during a pause instead of calling it unknown. Per-run cost and
+compaction counts are still not imported.
 
 CLI:  python -m modules.openclaw_import <export.zip|dir> [--slug NAME]
 
@@ -66,21 +67,39 @@ def _epoch_s(ts: str, row_no: int) -> float:
         raise ValueError(f"steps.csv row {row_no}: ts_end={ts!r} is not ISO-8601")
 
 
-def read_steps(path: Path) -> list[dict]:
-    """steps.csv rows from a zip or a directory. Raises when the file is
-    missing or lacks the columns this importer depends on."""
+def _read_csv(path: Path, name: str, required: bool) -> list[dict]:
+    """Rows of one CSV inside a zip or directory. Missing optional files
+    yield [] - missing required ones raise."""
     if path.is_dir():
-        f = path / "steps.csv"
+        f = path / name
         if not f.is_file():
-            raise FileNotFoundError(f"no steps.csv in {path}")
+            if required:
+                raise FileNotFoundError(f"no {name} in {path}")
+            return []
         text = f.read_text(encoding="utf-8")
     else:
         with zipfile.ZipFile(path) as z:
-            names = [n for n in z.namelist() if n.rsplit("/", 1)[-1] == "steps.csv"]
-            if not names:
-                raise FileNotFoundError(f"no steps.csv inside {path.name}")
-            text = z.read(names[0]).decode("utf-8")
-    rows = list(csv.DictReader(io.StringIO(text)))
+            hits = [n for n in z.namelist() if n.rsplit("/", 1)[-1] == name]
+            if not hits:
+                if required:
+                    raise FileNotFoundError(f"no {name} inside {path.name}")
+                return []
+            text = z.read(hits[0]).decode("utf-8")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def read_tools(path: Path) -> list[dict]:
+    """tools.csv rows (optional). Rows lacking the columns we need are
+    ignored - a tool row without a usable interval tells us nothing."""
+    rows = _read_csv(path, "tools.csv", required=False)
+    need = ("session_key", "category", "start", "end")
+    return [r for r in rows if all(r.get(c) not in (None, "") for c in need)]
+
+
+def read_steps(path: Path) -> list[dict]:
+    """steps.csv rows from a zip or a directory. Raises when the file is
+    missing or lacks the columns this importer depends on."""
+    rows = _read_csv(path, "steps.csv", required=True)
     if not rows:
         raise ValueError("steps.csv has no rows")
     missing = [c for c in _REQUIRED if c not in rows[0]]
@@ -93,7 +112,9 @@ def read_steps(path: Path) -> list[dict]:
 def build_conversations(rows: list[dict]) -> tuple[dict[str, dict], int]:
     """Lane -> AgentX-shaped structure. Returns ({conv_id: structure},
     n_skipped). Rows without a usable timestamp are skipped and counted —
-    never silently defaulted to 0."""
+    never silently defaulted to 0. Each structure carries '_t0' (the lane's
+    epoch anchor) and '_keys' (its session_keys) so activity intervals can
+    be aligned to the same clock; both are stripped before writing."""
     lanes: dict[str, list[dict]] = {}
     skipped = 0
     for i, r in enumerate(rows, start=2):   # 2 = first data line in the file
@@ -145,6 +166,7 @@ def build_conversations(rows: list[dict]) -> tuple[dict[str, dict], int]:
             }]
         leaves = nodes[0]["children"] if is_sub else nodes
         out[cid] = {
+            "_t0": t0, "_keys": sorted({t["_key"] for t in turns if t["_key"]}),
             "blockSize": None, "nodes": nodes,
             "totals": {
                 "in": sum(n["in"] for n in leaves),
@@ -158,6 +180,39 @@ def build_conversations(rows: list[dict]) -> tuple[dict[str, dict], int]:
     return out, skipped
 
 
+def _activities_by_conversation(tool_rows: list[dict],
+                                structures: dict[str, dict],
+                                ) -> tuple[dict[str, list[dict]], int]:
+    """Tool calls -> per-conversation, lane-relative activity intervals.
+    A tool row whose session_key belongs to no imported lane is dropped (it
+    cannot be placed on any timeline); intervals that end before they start
+    are dropped too rather than silently flipped."""
+    key_to_cid: dict[str, str] = {}
+    for cid, st in structures.items():
+        for k in st.get("_keys", ()):
+            key_to_cid.setdefault(k, cid)
+    out: dict[str, list[dict]] = {}
+    kept = 0
+    for r in tool_rows:
+        cid = key_to_cid.get((r.get("session_key") or "").strip())
+        if cid is None:
+            continue
+        try:
+            start, end = float(r["start"]), float(r["end"])
+        except (TypeError, ValueError):
+            continue
+        if end < start:
+            continue
+        t0 = structures[cid]["_t0"]
+        out.setdefault(cid, []).append({
+            "category": (r.get("category") or "other").strip() or "other",
+            "start_s": round(start - t0, 3), "end_s": round(end - t0, 3)})
+        kept += 1
+    for v in out.values():
+        v.sort(key=lambda a: a["start_s"])
+    return out, kept
+
+
 def import_openclaw(path: str | Path, slug: str | None = None,
                     data_dir: Path | None = None) -> dict:
     """Write data/<slug>/{detail,conversations_index}.json + conversations/*.
@@ -168,6 +223,8 @@ def import_openclaw(path: str | Path, slug: str | None = None,
     structures, skipped = build_conversations(read_steps(path))
     if not structures:
         raise ValueError(f"{path}: no usable rows (all {skipped} skipped)")
+    activities, n_acts = _activities_by_conversation(read_tools(path),
+                                                     structures)
 
     conv_dir = data_dir / slug / "conversations"
     conv_dir.mkdir(parents=True, exist_ok=True)
@@ -178,8 +235,12 @@ def import_openclaw(path: str | Path, slug: str | None = None,
     totals = dict.fromkeys(("in", "out", "cached", "uncached"), 0)
     main_turns = sub_turns = sub_groups = 0
     for cid, st in structures.items():
+        t0 = st.pop("_t0")
+        st.pop("_keys", None)
+        acts = activities.get(cid, [])
         with open(conv_dir / f"{cid}.json", "w", encoding="utf-8") as f:
-            json.dump({"conv_id": cid, "structure": st}, f)
+            json.dump({"conv_id": cid, "structure": st,
+                       "activities": acts}, f)
         leaves = (st["nodes"][0]["children"]
                   if st["nodes"][0]["kind"] == "subagent" else st["nodes"])
         for n in leaves:
@@ -225,8 +286,9 @@ def import_openclaw(path: str | Path, slug: str | None = None,
     with open(data_dir / slug / "conversations_index.json", "w",
               encoding="utf-8") as f:
         json.dump(index, f)
-    logger.info("%s: %d conversations, %d skipped rows", slug, len(index),
-                skipped)
+    detail["summary"]["activityIntervals"] = n_acts
+    logger.info("%s: %d conversations, %d activity intervals, %d skipped rows",
+                slug, len(index), n_acts, skipped)
     detail["skipped_rows"] = skipped
     return detail
 
@@ -241,6 +303,7 @@ def main() -> None:
     s = d["summary"]
     print(f"imported {d['slug']}: {d['conversation_count']} conversations, "
           f"{s['mainTurns'] + s['subagentTurns']:,} model calls, "
+          f"{s.get('activityIntervals', 0):,} tool intervals, "
           f"{d['skipped_rows']} rows skipped")
     print("pick it in the dataset dropdown on Explorer or Correlations")
 

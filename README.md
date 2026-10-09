@@ -34,6 +34,11 @@ in the app for explanations of measures, columns, and controls.
   bars to build color-coded selections on one chart and see how much of every
   bar on the other charts correlates, stacked by color, with per-selection
   inspectors in the left panel.
+- **Pause Analytics** — what happens in the dead air between turns: pause
+  durations stacked by cause (subagent work from the trace structure, tool
+  categories from an imported export, and an honest "unknown" remainder),
+  alongside the ISL delivered when each pause ended, on one shared duration
+  axis.
 - **Deep-dive** — implied FLOPs / memory / network aggregated over the selected
   conversations, three scatter charts over a shared x measure, a click magnifier
   (5×) with cross-chart highlighting, and a per-request point inspector.

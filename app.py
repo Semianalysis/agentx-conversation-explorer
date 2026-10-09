@@ -11,7 +11,8 @@ from dash import Dash, Input, Output, dcc, html
 
 from modules import (correlations_callbacks, correlations_layout,
                      deepdive_callbacks, deepdive_layout, explorer_callbacks,
-                     explorer_layout, overview_callbacks, overview_layout)
+                     explorer_layout, overview_callbacks, overview_layout,
+                     pause_callbacks, pause_layout)
 from modules.theme import F_BASE
 from modules.version import APP_BUILD
 
@@ -23,6 +24,7 @@ _TABS = [
     ("explorer", "Explorer"),
     ("correlations", "Correlations"),
     ("deepdive", "Deep-dive"),
+    ("pauses", "Pause Analytics"),
 ]
 
 _APP_NAME = f"AgentX Conversation Explorer bld {APP_BUILD}"
@@ -49,7 +51,7 @@ app.layout = html.Div(
                                 "whiteSpace": "nowrap"}),
                 dcc.Tabs(
                     id="at-tabs", value="overview",
-                    style={"height": "36px", "width": "780px"},
+                    style={"height": "36px", "width": "900px"},
                     children=[dcc.Tab(label=lbl, value=val,
                                       style={"padding": "8px", "fontSize": F_BASE},
                                       selected_style={"padding": "8px",
@@ -66,6 +68,8 @@ app.layout = html.Div(
         html.Div(correlations_layout.layout(), id="at-tabwrap-correlations",
                  style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
         html.Div(deepdive_layout.layout(), id="at-tabwrap-deepdive",
+                 style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
+        html.Div(pause_layout.layout(), id="at-tabwrap-pauses",
                  style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
     ],
 )
@@ -89,6 +93,7 @@ overview_callbacks.register_overview_callbacks(app)
 explorer_callbacks.register_explorer_callbacks(app)
 correlations_callbacks.register_correlations_callbacks(app)
 deepdive_callbacks.register_deepdive_callbacks(app)
+pause_callbacks.register_pause_callbacks(app)
 
 
 if __name__ == "__main__":

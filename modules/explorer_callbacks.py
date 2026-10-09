@@ -19,8 +19,9 @@ from modules.theme import color_for
 logger = logging.getLogger(__name__)
 
 # The dataset is GLOBAL state — every tab is a viewport onto the same data.
-# These dropdowns are two views of ONE value, synced both ways.
-_DATASET_DDS = ("at-explorer-dataset-dd", "at-corr-dataset-dd")
+# These dropdowns are views of ONE value, synced both ways.
+_DATASET_DDS = ("at-explorer-dataset-dd", "at-corr-dataset-dd",
+                "at-pause-dataset-dd")
 
 # Startup default: the FULL weka traces (user 2026-08-29: the 256k-limit
 # variant is not very useful as a default). Falls back to the first cached
