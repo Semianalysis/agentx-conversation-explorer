@@ -20,7 +20,7 @@ import logging
 from dash import ALL, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
-from modules import api_client, records
+from modules import records
 from modules.arch import ARCHITECTURES, resolve_assumptions
 from modules.binning import bin_counts, edge_label, filter_records, make_bins
 from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES, MEASURES,

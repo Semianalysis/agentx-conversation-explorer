@@ -45,7 +45,6 @@ def _available_slugs() -> set[str]:
 # Startup default: the FULL weka traces (user 2026-08-29: the 256k-limit
 # variant is not very useful as a default). Falls back to the first cached
 # dataset when the preferred one isn't on disk.
-DEFAULT_DATASET_SLUG = "cc-traces-weka-062126"
 
 
 def _annotate_sort_columns(sort_by: list[dict]) -> list[dict]:

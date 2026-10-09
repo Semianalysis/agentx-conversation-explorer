@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
-from modules import api_client, controls, records, theme
+from modules import controls, records, theme
 from modules.arch import ARCHITECTURES, resolve_assumptions
 from modules.deepdive_data import (aggregate_selection, grouped_series,
                                    sweep_points, zoom_member_uids)

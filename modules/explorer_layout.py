@@ -19,7 +19,6 @@ from __future__ import annotations
 from dash import dash_table, dcc, html
 
 from modules import controls
-from modules.controls import NONE
 from modules.theme import F_SMALL, GRAPH_CONFIG, MONO
 
 # d3-format thousands grouping as a PLAIN dict (not a Format object): the sort

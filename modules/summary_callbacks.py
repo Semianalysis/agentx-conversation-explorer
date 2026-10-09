@@ -6,10 +6,6 @@ import logging
 from dash import ALL, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
-import base64
-import tempfile
-from pathlib import Path
-
 from modules import api_client, controls, hf_client, records
 from modules.controls import info
 from modules.explorer_data import apply_selection

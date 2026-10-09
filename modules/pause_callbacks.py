@@ -14,7 +14,7 @@ from modules.figures import empty_figure
 from modules.pause_data import (UNKNOWN, all_pauses, cause_totals,
                                 duration_bins, isl_by_bin, stack_by_cause)
 from modules.pause_layout import ISL_MEASURES
-from modules.theme import F_SMALL, MONO, PALETTE, fmt_count
+from modules.theme import F_SMALL, PALETTE, fmt_count
 
 logger = logging.getLogger(__name__)
 
