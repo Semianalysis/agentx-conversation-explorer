@@ -10,12 +10,11 @@ from dash.exceptions import PreventUpdate
 
 from modules import controls, records, theme
 from modules.binning import edge_label
-from modules.explorer_callbacks import cached_dataset_options
 from modules.figures import empty_figure
 from modules.pause_data import (UNKNOWN, all_pauses, cause_totals,
                                 duration_bins, isl_by_bin, stack_by_cause)
 from modules.pause_layout import ISL_MEASURES
-from modules.theme import F_SMALL, MONO, PALETTE, fmt_count
+from modules.theme import F_SMALL, PALETTE, fmt_count
 
 logger = logging.getLogger(__name__)
 
@@ -32,27 +31,26 @@ def cause_color(cause: str, order: list[str]) -> str:
         else PALETTE[0]
 
 
-def _pauses_for(slug: str, selection: dict | None, min_s: float) -> list[dict]:
-    pool = records.load_records(slug)
-    sel = set((selection or {}).get("conv_ids") or []) \
-        if (selection or {}).get("slug") == slug else None
-    ps = all_pauses(pool, sel, records.load_activities(slug))
+def _pauses_for(slugs: list[str], selection: dict | None,
+                min_s: float) -> list[dict]:
+    """Pauses of the working set. An EMPTY conversation selection means
+    every conversation - the explorer writes conv_ids=[] whenever nothing is
+    ticked, and reading that as 'select nothing' emptied the whole tab."""
+    pool = records.load_pool(slugs)
+    ids = (selection or {}).get("conv_ids") or []
+    sel = set(ids) if ids else None
+    ps = all_pauses(pool, sel, records.load_pool_activities(slugs))
     return [p for p in ps if p["duration_s"] >= min_s]
 
 
 def register_pause_callbacks(app) -> None:
     @app.callback(
-        Output("at-pause-dataset-dd", "options"),
-        Input("at-tabs", "value"),
-        Input("at-summary-cache-store", "data"),
-        Input("at-sources-store", "data"),
+        Output("at-pause-dataset-echo", "children"),
+        Input("at-explorer-filter-store", "data"),
     )
-    def dataset_options(_tab, _cache, session_sources):
-        try:
-            return cached_dataset_options(session_sources)
-        except Exception:
-            logger.exception("pause dataset options failed")
-            raise PreventUpdate
+    def echo_datasets(filters):
+        slugs = (filters or {}).get("slugs") or []
+        return "\n".join(slugs) if slugs else "none loaded (see Explorer)"
 
     @app.callback(
         Output("at-pause-causes-cl", "options"),
@@ -68,10 +66,10 @@ def register_pause_callbacks(app) -> None:
         ticked by default; a cause that disappears from the data drops out
         of the selection rather than lingering as a phantom."""
         try:
-            slug = (filters or {}).get("slug")
-            if not slug:
+            slugs = (filters or {}).get("slugs") or []
+            if not slugs:
                 return [], []
-            ps = _pauses_for(slug, selection, float(min_s or 0))
+            ps = _pauses_for(slugs, selection, float(min_s or 0))
             if not ps:
                 return [], []
             totals = cause_totals(ps)
@@ -99,15 +97,15 @@ def register_pause_callbacks(app) -> None:
     )
     def render(filters, selection, min_s, scale, weight, causes, isl_field):
         try:
-            slug = (filters or {}).get("slug")
-            if not slug:
+            slugs = (filters or {}).get("slugs") or []
+            if not slugs:
                 fig = empty_figure("Pause analytics",
-                                   "pick a dataset on Explorer", height=None)
-                return fig, fig, html.Div("pick a dataset", style={
+                                   "load a dataset on Explorer", height=None)
+                return fig, fig, html.Div("load a dataset", style={
                     "color": "#777", "fontSize": F_SMALL}), ""
             min_s = float(min_s or 0)
             log_x = scale != "linear"
-            ps = _pauses_for(slug, selection, min_s)
+            ps = _pauses_for(slugs, selection, min_s)
             if not ps:
                 fig = empty_figure(
                     "Pause analytics",

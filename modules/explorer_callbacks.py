@@ -10,13 +10,13 @@ import tempfile
 from pathlib import Path
 
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback_context, no_update
+from dash import ALL, Input, Output, State, callback_context, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from modules import api_client, records, theme
 from modules.explorer_data import (CURVE_X_MEASURES,
                                    build_conversation_table,
-                                   conversation_curves, sync_updates)
+                                   conversation_curves)
 from modules.explorer_layout import TABLE_COLUMNS
 from modules.theme import color_for
 
@@ -39,44 +39,23 @@ def _available_slugs() -> set[str]:
     """Datasets this machine can actually open right now."""
     return {p.parent.name for p in api_client.DATA_DIR.glob("*/detail.json")}
 
-# The dataset is GLOBAL state — every tab is a viewport onto the same data.
-# These dropdowns are views of ONE value, synced both ways.
-_DATASET_DDS = ("at-explorer-dataset-dd", "at-corr-dataset-dd",
-                "at-pause-dataset-dd")
+# The working set is GLOBAL state: chosen in this panel, read by every tab
+# through at-explorer-filter-store.
 
 # Startup default: the FULL weka traces (user 2026-08-29: the 256k-limit
 # variant is not very useful as a default). Falls back to the first cached
 # dataset when the preferred one isn't on disk.
-DEFAULT_DATASET_SLUG = "cc-traces-weka-062126"
 
 
-def cached_dataset_options(session_sources: list[dict] | None = None
-                           ) -> list[dict]:
-    """Dropdown options for the shared dataset picker.
+def _ticks_after_load(ticked: list[str] | None, slug: str) -> list[str]:
+    """The working set after loading `slug`: unchanged when something is
+    already ticked (a load must not silently change what is charted), else
+    just the new dataset, so the first load charts itself."""
+    return list(ticked) if ticked else [slug]
 
-    PUBLISHED datasets (the AgentX registry) are always offered once their
-    traces are cached. A LOCAL import is offered only when this session's
-    source list names it, so private traces on this machine never appear by
-    themselves — the user loads them from the Dataset panel or the Summary
-    finder first.
-    """
-    from modules import hf_client, sources as src
-    try:
-        website = list(api_client.fetch_datasets())
-    except Exception:
-        website = []
-    wanted_local = set(src.slugs(session_sources or [], src.LOCAL))
-    local = [d for d in hf_client.local_hf_datasets()
-             if d["slug"] in wanted_local]
-    opts = []
-    for d in website + local:
-        n = len(api_client.cached_conversation_ids(d["slug"]))
-        if n:
-            mark = "" if src.source_kind(d) == src.WEBSITE else "  [local]"
-            opts.append({"label": f"{d.get('label', d['slug'])}{mark} "
-                                  f"({n} convs cached)",
-                         "value": d["slug"]})
-    return opts
+
+def _tick_hint(ticked: list[str] | None) -> str:
+    return " \u2014 tick it to add it to the charts" if ticked else ""
 
 
 def _annotate_sort_columns(sort_by: list[dict]) -> list[dict]:
@@ -141,31 +120,6 @@ def register_explorer_callbacks(app) -> None:
     _register_sort_semantics(app, "at-deep-conv-table", "at-deep-sort-store")
 
     @app.callback(
-        [Output(dd, "value", allow_duplicate=True) for dd in _DATASET_DDS],
-        [Input(dd, "value") for dd in _DATASET_DDS],
-        prevent_initial_call=True,
-    )
-    def sync_dataset(*values):
-        """Self-loop sync of the shared dataset across all tabs: whichever
-        dropdown the user changed wins; the echo of our own write arrives with
-        all values equal and stops the loop (sync_updates returns None)."""
-        try:
-            trig = callback_context.triggered_id
-            if trig not in _DATASET_DDS:
-                raise PreventUpdate
-            updates = sync_updates(list(values), _DATASET_DDS.index(trig))
-            if updates is None:
-                raise PreventUpdate
-            value, stale = updates
-            return [value if i in stale else no_update
-                    for i in range(len(_DATASET_DDS))]
-        except PreventUpdate:
-            raise
-        except Exception:
-            logger.exception("dataset sync failed")
-            raise PreventUpdate
-
-    @app.callback(
         Output("at-explorer-chartopts-store", "data"),
         Input("at-explorer-xscale-radio", "value"),
         Input("at-explorer-onlysel-cl", "value"),
@@ -175,31 +129,9 @@ def register_explorer_callbacks(app) -> None:
         return {"xscale": xscale, "only_selected": "only" in (onlysel or []),
                 "xmeasure": xmeasure or "turn"}
     @app.callback(
-        Output("at-explorer-dataset-dd", "options"),
-        Output("at-explorer-dataset-dd", "value"),
-        Input("at-tabs", "value"),
-        Input("at-summary-cache-store", "data"),
-        Input("at-sources-store", "data"),
-        State("at-explorer-dataset-dd", "value"),
-    )
-    def dataset_options(_tab, _cache, session_sources, current):
-        try:
-            opts = cached_dataset_options(session_sources)
-            slugs = {o["value"] for o in opts}
-            if current in slugs:
-                value = current
-            elif DEFAULT_DATASET_SLUG in slugs:
-                value = DEFAULT_DATASET_SLUG
-            else:
-                value = opts[0]["value"] if opts else None
-            return opts, value
-        except Exception:
-            logger.exception("explorer dataset options failed")
-            raise PreventUpdate
-
-    @app.callback(
         Output("at-sources-store", "data"),
         Output("at-explorer-sources-status", "children"),
+        Output("at-explorer-active-cl", "value", allow_duplicate=True),
         Input("at-explorer-load-local", "contents"),
         Input("at-explorer-load-session", "contents"),
         Input("at-summary-load-btn", "n_clicks"),
@@ -207,20 +139,23 @@ def register_explorer_callbacks(app) -> None:
         State("at-explorer-load-session", "filename"),
         State("at-summary-found-store", "data"),
         State("at-sources-store", "data"),
+        State("at-explorer-active-cl", "value"),
         prevent_initial_call=True,
     )
     def manage_sources(local_contents, session_contents, _load_clicks,
-                       local_name, session_name, found, current):
-        """THE owner of the session source list: a local export loaded from
-        the Dataset panel, a session file restored there, or a dataset the
-        Summary finder loaded all converge here."""
+                       local_name, session_name, found, current, ticked):
+        """THE owner of the session source list: a trace file picked in the
+        Dataset panel, a session file restored there, or a dataset the Summary
+        finder loaded all converge here. Whatever arrives is appended to the
+        list; render_loaded ticks it, so loading always visibly does
+        something."""
         from modules import openclaw_import, sources as src
         trig = callback_context.triggered_id
         try:
             if trig == "at-explorer-load-local":
                 if not local_contents:
                     raise PreventUpdate
-                path = _write_upload(local_contents, local_name or "export.zip")
+                path = _write_upload(local_contents, local_name or "traces.zip")
                 try:
                     detail = openclaw_import.import_openclaw(path)
                 finally:
@@ -230,54 +165,81 @@ def register_explorer_callbacks(app) -> None:
                               src.make_source(detail["slug"], src.LOCAL,
                                               detail.get("label", ""),
                                               local_name))
+                ticks = _ticks_after_load(ticked, detail["slug"])
                 return out, (f"loaded {detail['slug']}: "
-                             f"{detail['conversation_count']} conversations")
+                             f"{detail['conversation_count']} conversations"
+                             + _tick_hint(ticked)), ticks
 
             if trig == "at-explorer-load-session":
                 if not session_contents:
                     raise PreventUpdate
                 blob = json.loads(_decode_upload(session_contents))
-                restored = src.parse_blob(blob)
+                restored, was_ticked = src.parse_blob(blob)
                 available = _available_slugs()
                 present, missing = src.resolve(restored, available)
-                msg = f"session restored: {len(present)} source(s)"
+                here = {p_["slug"] for p_ in present}
+                ticks = [a for a in was_ticked if a in here]
+                msg = (f"session restored: {len(present)} source(s), "
+                       f"{len(ticks)} charted")
                 if missing:
                     msg += ("\nnot on this machine: "
                             + ", ".join(m["slug"] for m in missing)
-                            + " — load the export(s) again to re-add")
-                return present, msg
+                            + " \u2014 load the trace file(s) again to re-add")
+                lost = [a for a in was_ticked if a not in here]
+                if lost:
+                    msg += "\nwas charted but is missing: " + ", ".join(lost)
+                return present, msg, ticks
 
             if trig == "at-summary-load-btn":
                 detail = (found or {}).get("detail")
                 if not detail:
                     raise PreventUpdate
-                from modules import sources as s2
-                out = s2.add(current or [],
-                             s2.make_source(detail["slug"],
-                                            s2.source_kind(detail),
-                                            detail.get("label", "")))
-                return out, f"added {detail['slug']} to this session"
+                out = src.add(current or [],
+                              src.make_source(detail["slug"],
+                                              src.source_kind(detail),
+                                              detail.get("label", "")))
+                ticks = _ticks_after_load(ticked, detail["slug"])
+                return (out, f"added {detail['slug']} to this session"
+                        + _tick_hint(ticked), ticks)
             raise PreventUpdate
         except PreventUpdate:
             raise
         except Exception as e:
             logger.exception("source management failed")
-            return no_update, f"FAILED: {e}"
+            return no_update, f"FAILED: {e}", no_update
+
+    @app.callback(
+        Output("at-sources-store", "data", allow_duplicate=True),
+        Input({"type": "at-explorer-unload", "slug": ALL}, "n_clicks"),
+        State("at-sources-store", "data"),
+        prevent_initial_call=True,
+    )
+    def unload_source(_clicks, current):
+        """The row's X drops that dataset from the session. The cached copy on
+        disk is untouched - unloading is not deleting."""
+        from modules import sources as src
+        trig = callback_context.triggered_id
+        tval = (callback_context.triggered[0]["value"]
+                if callback_context.triggered else None)
+        if not isinstance(trig, dict) or not tval:
+            raise PreventUpdate
+        return src.remove(current or [], trig["slug"])
 
     @app.callback(
         Output("at-sources-download", "data"),
         Input("at-explorer-export-session-btn", "n_clicks"),
         State("at-sources-store", "data"),
+        State("at-explorer-active-cl", "value"),
         prevent_initial_call=True,
     )
-    def export_session(n, current):
+    def export_session(n, current, ticked):
         from dash import dcc as _dcc
 
         from modules import sources as src
         try:
             if not n:
                 raise PreventUpdate
-            blob = src.export_blob(current or [])
+            blob = src.export_blob(current or [], ticked or [])
             return _dcc.send_string(json.dumps(blob, indent=1),
                                     "agentx-explorer-session.json")
         except PreventUpdate:
@@ -287,11 +249,120 @@ def register_explorer_callbacks(app) -> None:
             raise PreventUpdate
 
     @app.callback(
-        Output("at-explorer-filter-store", "data"),
-        Input("at-explorer-dataset-dd", "value"),
+        Output("at-tabs", "value", allow_duplicate=True),
+        Output("at-summary-scope-radio", "value"),
+        Input("at-explorer-browse-btn", "n_clicks"),
+        prevent_initial_call=True,
     )
-    def coalesce_filters(slug):
-        return {"slug": slug}
+    def browse_published(n):
+        """Browsing published datasets IS the Summary finder - take the user
+        there with the scope already set, rather than build a second search UI
+        that could disagree with it."""
+        if not n:
+            raise PreventUpdate
+        return "summary", "online"
+
+    @app.callback(
+        Output("at-explorer-loaded-list", "children"),
+        Output("at-explorer-active-cl", "value"),
+        Input("at-sources-store", "data"),
+        Input("at-summary-cache-store", "data"),
+        State("at-explorer-active-cl", "value"),
+    )
+    def render_loaded(session_sources, _cache, active):
+        """The visible working set: one row per loaded dataset, with its tick
+        box, conversation count and unload X.
+
+        Ticking belongs to the user; manage_sources ticks a load into an empty
+        working set, because only it knows which dataset that was (sources.add
+        re-sorts the list). Here we only render and PRUNE - a tick whose
+        dataset was unloaded goes with it. Nothing is ever ticked by guess, so
+        a cache refresh cannot silently change what is charted."""
+        try:
+            srcs = session_sources or []
+            known = {s["slug"] for s in srcs}
+            active = [a for a in (active or []) if a in known]
+            if not srcs:
+                return html.Div("nothing loaded — browse the published "
+                                "datasets or pick a local trace file above",
+                                style={"fontSize": "11px", "color": "#999",
+                                       "padding": "4px"}), []
+            rows = []
+            for s_ in srcs:
+                n = len(api_client.cached_conversation_ids(s_["slug"]))
+                tag = "" if s_["kind"] == "website" else "  [local]"
+                count = (f"{n:,}" if n else "no traces")
+                count_style = {"fontSize": "11px",
+                               "color": "#888" if n else "#b36b00"}
+                count_title = ("cached conversations" if n else
+                               "no traces cached yet - open Summary and use "
+                               "'Download traces' on this dataset's card")
+                rows.append(html.Div(
+                    style={"display": "flex", "alignItems": "center",
+                           "gap": "6px", "padding": "1px 0"},
+                    children=[
+                        dcc.Checklist(
+                            id={"type": "at-explorer-active-one",
+                                "slug": s_["slug"]},
+                            options=[{"label": "", "value": s_["slug"]}],
+                            value=[s_["slug"]] if s_["slug"] in active else [],
+                            style={"display": "inline-block"}),
+                        html.Span(f"{s_['label']}{tag}",
+                                  title=s_["slug"],
+                                  style={"flex": "1 1 auto", "minWidth": "0",
+                                         "fontSize": "12px",
+                                         "overflow": "hidden",
+                                         "textOverflow": "ellipsis",
+                                         "whiteSpace": "nowrap"}),
+                        html.Span(count, style=count_style,
+                                  title=count_title),
+                        html.Button("×", id={"type": "at-explorer-unload",
+                                             "slug": s_["slug"]}, n_clicks=0,
+                                    title="Unload from this session (the "
+                                          "cached copy on disk is kept)",
+                                    style={"fontSize": "11px",
+                                           "padding": "0 6px",
+                                           "lineHeight": "16px"}),
+                    ]))
+            return rows, active
+        except Exception:
+            logger.exception("loaded list render failed")
+            raise PreventUpdate
+
+    @app.callback(
+        Output("at-explorer-active-cl", "value", allow_duplicate=True),
+        Input({"type": "at-explorer-active-one", "slug": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    def collect_ticks(per_row):
+        """Each row owns its own tick; the working set is their union."""
+        return [slug for row in (per_row or []) for slug in (row or [])]
+
+    @app.callback(
+        Output("at-explorer-filter-store", "data"),
+        Output("at-explorer-pending-status", "children"),
+        Input("at-explorer-active-cl", "value"),
+        Input("at-summary-cache-store", "data"),
+        prevent_initial_call=True,
+    )
+    def coalesce_filters(active, _cache_counts):
+        """The ticked datasets ARE the working set, shared by every tab.
+
+        A dataset can be ticked before its traces are cached, so the set is
+        split: 'slugs' are the ones that can actually be read, 'pending' the
+        ones still needing a download. Consumers read 'slugs' and therefore
+        never hit a missing cache; the user is TOLD about the rest instead of
+        staring at a blank tab. 'cached' makes this store change when a
+        download finishes, which is what re-renders every tab."""
+        ticked = list(active or [])
+        counts = {s: len(api_client.cached_conversation_ids(s))
+                  for s in ticked}
+        ready = [s for s in ticked if counts[s]]
+        pending = [s for s in ticked if not counts[s]]
+        note = ("" if not pending else
+                "no traces cached for " + ", ".join(pending)
+                + " \u2014 open Summary and use 'Download traces' on its card")
+        return {"slugs": ready, "pending": pending, "cached": counts}, note
 
     @app.callback(
         Output("at-explorer-conv-table", "data"),
@@ -304,15 +375,18 @@ def register_explorer_callbacks(app) -> None:
         Deep-dive) with identical rows in identical order, so row indices and
         the shared selection can never diverge."""
         try:
-            if not filters or not filters.get("slug"):
+            slugs = (filters or {}).get("slugs") or []
+            if not slugs:
                 return [], []
-            slug = filters["slug"]
-            pool = records.load_records(slug)
-            index_ids = [it["conv_id"] for it in api_client.fetch_conversation_index(slug)]
+            pool = records.load_pool(slugs)
+            index_ids = records.merged_index(slugs)
             rows, skipped = build_conversation_table(pool, index_ids, None)
+            for r in rows:                      # origin is a projection of the
+                r["dataset"] = records.split_conv_id(r["id"])[0]   # row's id
             if skipped:
-                logger.warning("%s: %d conversations without main turns skipped",
-                               slug, skipped)
+                logger.warning("%s: %d conversations without main turns "
+                               "summarized from their own turns",
+                               "+".join(slugs), skipped)
             return rows, rows
         except Exception:
             logger.exception("explorer table data failed")
@@ -360,17 +434,22 @@ def register_explorer_callbacks(app) -> None:
         same object seen twice, so they can never diverge."""
         try:
             trig = callback_context.triggered_id
-            slug = (filters or {}).get("slug")
+            slugs = (filters or {}).get("slugs") or []
             table_rows = table_rows or []
             current_ids = set((current or {}).get("conv_ids") or [])
-            if (current or {}).get("slug") != slug:
-                current_ids = set()
 
             if trig == "at-explorer-clear-btn":
                 new_ids: set[str] = set()
             elif trig == "at-explorer-filter-store":
-                # dataset switch invalidates the selection
-                new_ids = current_ids if slug == (current or {}).get("slug") else set()
+                # Keep only selections whose dataset is still in the working
+                # set. Conversation ids are namespaced, so this is decidable
+                # here; the table passed as State is the PREVIOUS one and
+                # would keep ids from datasets that just went away.
+                live = set(slugs)
+                new_ids = {cid for cid in current_ids
+                           if records.split_conv_id(cid)[0] in live}
+                if new_ids == current_ids:
+                    raise PreventUpdate
             elif trig == "at-explorer-growth-graph":
                 if not click or not click.get("points"):
                     raise PreventUpdate
@@ -394,7 +473,7 @@ def register_explorer_callbacks(app) -> None:
             new_rows = [i for i, r in enumerate(table_rows) if r["id"] in new_ids]
             status = (f"selected: {len(new_ids)} conversations"
                       if new_ids else "no selection (all conversations)")
-            store = {"slug": slug, "conv_ids": sorted(new_ids)}
+            store = {"slugs": slugs, "conv_ids": sorted(new_ids)}
             return store, new_rows, [], new_rows, [], None, status
         except PreventUpdate:
             raise
@@ -412,28 +491,28 @@ def register_explorer_callbacks(app) -> None:
     )
     def render_growth(filters, selection, visible_ids, chartopts):
         try:
-            if not filters or not filters.get("slug"):
+            slugs = (filters or {}).get("slugs") or []
+            if not slugs:
                 fig = go.Figure()
                 fig.update_layout(**theme.base_layout(
                     title="Conversation context growth"))
-                fig.add_annotation(text="pick a dataset", showarrow=False,
-                                   xref="paper", yref="paper", x=0.5, y=0.5)
+                fig.add_annotation(
+                    text="load a dataset in the Dataset panel",
+                    showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)
                 return fig
-            slug = filters["slug"]
             opts = chartopts or {}
-            pool = records.load_records(slug)
-            index_ids = [it["conv_id"] for it in api_client.fetch_conversation_index(slug)]
+            pool = records.load_pool(slugs)
+            index_ids = records.merged_index(slugs)
             rows, _ = build_conversation_table(pool, index_ids, None)
             ordinal = {r["id"]: r["ordinal"] for r in rows}
             wanted = set(visible_ids) if visible_ids else set(ordinal)
-            sel_ids = set((selection or {}).get("conv_ids") or []) \
-                if (selection or {}).get("slug") == slug else set()
+            sel_ids = set((selection or {}).get("conv_ids") or [])
             if opts.get("only_selected") and sel_ids:
                 wanted &= sel_ids
             x_measure = opts.get("xmeasure", "turn")
             curves = conversation_curves(pool, conv_ids=wanted & set(ordinal),
                                          x_measure=x_measure)
-            return _growth_figure(curves, ordinal, sel_ids & set(curves), slug,
+            return _growth_figure(curves, ordinal, sel_ids & set(curves),
                                   log_x=opts.get("xscale") == "log",
                                   x_measure=x_measure)
         except Exception:
@@ -441,7 +520,7 @@ def register_explorer_callbacks(app) -> None:
             raise PreventUpdate
 
 
-def _growth_figure(curves: dict, ordinal: dict, sel_ids: set, slug: str,
+def _growth_figure(curves: dict, ordinal: dict, sel_ids: set,
                    log_x: bool = False, x_measure: str = "turn") -> go.Figure:
     """One gray None-separated pool trace (fast) + a colored trace per selected
     conversation. customdata rows = [ordinal, conv_id] for click-to-select."""

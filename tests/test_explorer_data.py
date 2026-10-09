@@ -4,7 +4,8 @@ import unittest
 from modules.arch import resolve_assumptions
 from modules.explorer_data import (CURVE_X_MEASURES, apply_selection,
                                    augment_rows_with_compute, busy_offsets,
-                                   build_conversation_table, conversation_curves)
+                                   build_conversation_table,
+                                   conversation_curves)
 
 
 def _rec(conv_id, role="main", turn_index=0, in_t=100, out=10,
@@ -160,53 +161,43 @@ class TestBusyOffsets(unittest.TestCase):
 
 
 class TestApplySelection(unittest.TestCase):
-    def setUp(self):
-        self.pool = [_rec("cA"), _rec("cA", turn_index=1), _rec("cB")]
+    """Selection ids are namespaced '<slug>::<conv>' so two datasets in one
+    working set can never collide."""
 
-    def test_applies_on_matching_slug(self):
-        out, gates = apply_selection(self.pool, {"slug": "ds", "conv_ids": ["cA"]}, "ds")
+    def setUp(self):
+        self.pool = [_rec("ds::cA"), _rec("ds::cA", turn_index=1),
+                     _rec("ds::cB")]
+
+    def test_applies_to_loaded_dataset(self):
+        out, gates = apply_selection(
+            self.pool, {"slugs": ["ds"], "conv_ids": ["ds::cA"]}, ["ds"])
         self.assertEqual(len(out), 2)
         self.assertEqual(gates["n_sel_convs"], 1)
         self.assertEqual(gates["n_after_selection"], 2)
 
-    def test_ignored_on_other_dataset(self):
-        out, gates = apply_selection(self.pool, {"slug": "other", "conv_ids": ["cA"]}, "ds")
-        self.assertEqual(len(out), 3)  # not silently zeroed
+    def test_selection_from_an_unloaded_dataset_is_ignored_not_zeroed(self):
+        out, gates = apply_selection(
+            self.pool, {"slugs": ["other"], "conv_ids": ["other::cA"]}, ["ds"])
+        self.assertEqual(len(out), 3)
         self.assertEqual(gates, {})
 
+    def test_partial_overlap_keeps_only_the_loaded_part(self):
+        out, gates = apply_selection(
+            self.pool,
+            {"slugs": ["ds", "gone"], "conv_ids": ["ds::cB", "gone::cX"]},
+            ["ds"])
+        self.assertEqual([r["conv_id"] for r in out], ["ds::cB"])
+        self.assertEqual(gates["n_sel_convs"], 1)
+
     def test_no_selection_passthrough(self):
-        for sel in (None, {}, {"slug": "ds", "conv_ids": []}):
-            out, gates = apply_selection(self.pool, sel, "ds")
+        for sel in (None, {}, {"slugs": ["ds"], "conv_ids": []}):
+            out, gates = apply_selection(self.pool, sel, ["ds"])
             self.assertEqual(len(out), 3)
             self.assertEqual(gates, {})
 
-
-class TestSyncUpdates(unittest.TestCase):
-    """Shared-dataset propagation: one value, N synced widgets."""
-
-    def setUp(self):
-        from modules.explorer_data import sync_updates
-        self.sync = sync_updates
-
-    def test_propagates_trigger_value_to_stale_widgets(self):
-        self.assertEqual(self.sync(["b", "a", "a"], 0), ("b", [1, 2]))
-        self.assertEqual(self.sync(["a", "b", "a"], 1), ("b", [0, 2]))
-
-    def test_converged_returns_none_stopping_the_echo(self):
-        self.assertIsNone(self.sync(["a", "a", "a"], 2))
-        self.assertIsNone(self.sync([None, None, None], 0))
-
-    def test_clearing_propagates_the_none_value(self):
-        # a cleared dropdown clears the others: None is a real value here,
-        # "no change" is signaled by index absence
-        self.assertEqual(self.sync([None, "a", "a"], 0), (None, [1, 2]))
-
-    def test_partial_agreement_updates_only_stale(self):
-        self.assertEqual(self.sync(["b", "b", "a"], 0), ("b", [2]))
-
-    def test_bad_index_raises(self):
-        with self.assertRaises(IndexError):
-            self.sync(["a"], 3)
+    def test_unnamespaced_id_raises(self):
+        with self.assertRaises(ValueError):
+            apply_selection(self.pool, {"conv_ids": ["cA"]}, ["ds"])
 
 
 if __name__ == "__main__":

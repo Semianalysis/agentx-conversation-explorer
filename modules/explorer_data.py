@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from modules.arch import (ARCHITECTURES, GPUS, conversation_compute,
                           implied_gpu_seconds)
+from modules.records import has_main_agent, lane_turns, split_conv_id
 
 
 def group_by_conversation(pool: list[dict]) -> dict[str, list[dict]]:
@@ -18,11 +19,6 @@ def group_by_conversation(pool: list[dict]) -> dict[str, list[dict]]:
     for r in pool:
         by_conv.setdefault(r["conv_id"], []).append(r)
     return by_conv
-
-
-def _main_turns_ordered(conv_records: list[dict]) -> list[dict]:
-    return sorted((r for r in conv_records if r["role"] == "main"),
-                  key=lambda r: (r["turn_index"], r["start_s"]))
 
 
 def build_conversation_table(
@@ -60,16 +56,9 @@ def build_conversation_table(
     for cid, recs in by_conv.items():
         if wanted_models and not ({r["model"] for r in recs} & wanted_models):
             continue
-        main = _main_turns_ordered(recs)
-        if not main:
-            # A conversation whose every request is a subagent's own (an
-            # OpenClaw subagent lane; never an AgentX conversation, where
-            # subagents nest under a main agent). Summarize it from those
-            # requests instead of dropping half the dataset from the list.
-            main = sorted(recs, key=lambda r: (r["turn_index"], r["start_s"]))
+        main = lane_turns(recs)
+        if not has_main_agent(recs):
             skipped_no_main += 1
-        if not main:
-            continue
         rows.append({
             "id": cid,
             "ordinal": ordinal[cid],
@@ -168,7 +157,7 @@ CURVE_X_MEASURES = {
 def conversation_curves(pool: list[dict], conv_ids: set[str] | None = None,
                         x_measure: str = "turn",
                         ) -> dict[str, tuple[list[float], list[int]]]:
-    """Growth curve per conversation: y = each main turn's input context
+    """Growth curve per conversation: y = each lane turn's input context
     tokens (log axis on the chart); x per x_measure:
 
       'turn'            main-turn ordinal (1..n)
@@ -180,7 +169,8 @@ def conversation_curves(pool: list[dict], conv_ids: set[str] | None = None,
     Time measures clamp below 1 s UP to 1 so the first turn stays visible on
     a log axis (never dropped). Unknown x_measure -> KeyError.
     conv_ids limits which conversations get curves (None = all in pool).
-    Conversations with zero main turns are skipped (no curve to draw).
+    A conversation is its lane (records.lane_turns) - the same rule the
+    conversation list uses, so every listed conversation has a curve.
     """
     if x_measure not in CURVE_X_MEASURES:
         raise KeyError(f"unknown x_measure {x_measure!r}; "
@@ -189,9 +179,7 @@ def conversation_curves(pool: list[dict], conv_ids: set[str] | None = None,
     for cid, recs in group_by_conversation(pool).items():
         if conv_ids is not None and cid not in conv_ids:
             continue
-        main = _main_turns_ordered(recs)
-        if not main:
-            continue
+        main = lane_turns(recs)
         if x_measure == "turn":
             xs: list[float] = list(range(1, len(main) + 1))
         elif x_measure == "cumulative_time":
@@ -206,38 +194,38 @@ def conversation_curves(pool: list[dict], conv_ids: set[str] | None = None,
     return curves
 
 
-def apply_selection(records: list[dict], selection: dict | None, slug: str,
-                    ) -> tuple[list[dict], dict]:
+def apply_selection(records: list[dict], selection: dict | None,
+                    slugs: list[str]) -> tuple[list[dict], dict]:
     """Restrict a record pool to the Explorer's selected conversations.
 
-    selection = {'slug': ..., 'conv_ids': [...]} (the cross-tab selection
-    store). Applied only when it matches this pool's dataset; a selection made
-    on another dataset is ignored rather than silently zeroing the rows.
+    selection = {'slugs': [...], 'conv_ids': ['<slug>::<id>', ...]} (the
+    cross-tab selection store). Conversation ids are namespaced by dataset, so
+    a selection made on a working set that is no longer loaded matches nothing
+    - that is ignored (pool returned whole) rather than silently zeroing the
+    rows the user is looking at.
     Returns (records, gate_counts_update).
     """
     if not selection or not selection.get("conv_ids"):
         return records, {}
-    if selection.get("slug") != slug:
+    live = set(slugs or [])
+    ids = {cid for cid in selection["conv_ids"]
+           if split_conv_id(cid)[0] in live}
+    if not ids:
         return records, {}
-    ids = set(selection["conv_ids"])
     out = [r for r in records if r["conv_id"] in ids]
     return out, {"n_sel_convs": len(ids), "n_after_selection": len(out)}
 
 
-def sync_updates(values: list, trig_index: int) -> tuple | None:
-    """Propagate one widget's value across a group of synced widgets (the
-    shared dataset dropdowns: every tab is a viewport onto the SAME dataset).
+def live_selection(selection: dict | None, pool_ids) -> list[str]:
+    """The selected conversation ids that this pool actually holds.
 
-    Returns (value, stale_indices) — the trigger's value and the widgets that
-    must be written — or None when all values already agree; the caller must
-    then skip the write, or the sync echoes forever. The value itself may be
-    None (a cleared dropdown clears the others too), which is why "no change"
-    is signaled by index absence, never by a None value.
+    [] means "no usable selection" and every consumer reads that as ALL
+    conversations - the same rule as explorer_data.apply_selection. A stale id
+    (dataset unticked, or its traces not cached yet) is dropped rather than
+    raising inside a chart callback or emptying the tab.
     """
-    if not 0 <= trig_index < len(values):
-        raise IndexError(f"trig_index {trig_index} out of range 0..{len(values) - 1}")
-    v = values[trig_index]
-    stale = [i for i, x in enumerate(values) if x != v]
-    if not stale:
-        return None
-    return v, stale
+    ids = (selection or {}).get("conv_ids") or []
+    if not ids:
+        return []
+    live = [cid for cid in ids if cid in set(pool_ids)]
+    return live

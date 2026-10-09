@@ -20,7 +20,7 @@ import logging
 from dash import ALL, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
-from modules import api_client, records
+from modules import records
 from modules.arch import ARCHITECTURES, resolve_assumptions
 from modules.binning import bin_counts, edge_label, filter_records, make_bins
 from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES, MEASURES,
@@ -30,7 +30,7 @@ from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES, MEASURES,
                                        measure_values, member_mask,
                                        selection_color, set_live)
 from modules.deepdive_data import aggregate_selection
-from modules.explorer_callbacks import cached_dataset_options
+from modules.explorer_data import live_selection
 from modules.figures import (empty_figure, multi_histogram_figure,
                              selection_to_bins)
 from modules.theme import MONO, fmt_count
@@ -44,21 +44,21 @@ _N_BINS = 60
 _ENRICH_CACHE: dict = {}
 
 
-def _enriched_rows(slug: str, conv_selection: dict | None, config: dict | None,
-                   ) -> list[dict]:
+def _enriched_rows(slugs: list[str], conv_selection: dict | None,
+                   config: dict | None) -> list[dict]:
     """Per-request rows enriched with seq/start_s/busy_s/kv_bytes/flops for
     the Explorer-selected conversations (all when nothing selected), under
-    the global serving assumptions. Memoized on (slug, selection, config)."""
-    pool = records.load_records(slug)
-    sel_ids = tuple(sorted((conv_selection or {}).get("conv_ids") or [])) \
-        if (conv_selection or {}).get("slug") == slug else ()
+    the global serving assumptions. Memoized on (slugs, selection, config)."""
+    slugs = list(slugs or [])
+    pool = records.load_pool(slugs)
+    sel_ids = tuple(sorted((conv_selection or {}).get("conv_ids") or []))
     arch_key, _gpu_key, cfg = resolve_assumptions(config)
-    key = (slug, sel_ids, arch_key, tuple(sorted(cfg.items())))
+    key = (tuple(slugs), sel_ids, arch_key, tuple(sorted(cfg.items())))
     if key in _ENRICH_CACHE:
         return _ENRICH_CACHE[key]
-    index = api_client.fetch_conversation_index(slug)
-    ordinal = {it["conv_id"]: i + 1 for i, it in enumerate(index)}
-    conv_ids = list(sel_ids) or records.conversation_ids(pool)
+    ordinal = {cid: i + 1 for i, cid in enumerate(records.merged_index(slugs))}
+    in_pool = records.conversation_ids(pool)
+    conv_ids = live_selection({"conv_ids": list(sel_ids)}, in_pool) or in_pool
     rows = aggregate_selection(pool, conv_ids, ARCHITECTURES[arch_key], cfg,
                                ordinal)["per_request"]
     _ENRICH_CACHE.clear()  # keep exactly the latest working set
@@ -68,28 +68,24 @@ def _enriched_rows(slug: str, conv_selection: dict | None, config: dict | None,
 
 def register_correlations_callbacks(app) -> None:
     @app.callback(
-        Output("at-corr-dataset-dd", "options"),
-        Input("at-tabs", "value"),
-        Input("at-summary-cache-store", "data"),
-        Input("at-sources-store", "data"),
+        Output("at-corr-dataset-echo", "children"),
+        Input("at-explorer-filter-store", "data"),
     )
-    def dataset_options(_tab, _cache, session_sources):
-        try:
-            return cached_dataset_options(session_sources)
-        except Exception:
-            logger.exception("corr dataset options failed")
-            raise PreventUpdate
+    def echo_datasets(filters):
+        slugs = (filters or {}).get("slugs") or []
+        return "\n".join(slugs) if slugs else "none loaded (see Explorer)"
 
     @app.callback(
         Output("at-corr-models-dd", "options"),
-        Input("at-corr-dataset-dd", "value"),
+        Input("at-explorer-filter-store", "data"),
         prevent_initial_call=True,
     )
-    def model_options(slug):
+    def model_options(filters):
         try:
-            if not slug:
+            slugs = (filters or {}).get("slugs") or []
+            if not slugs:
                 return []
-            pool = records.load_records(slug)
+            pool = records.load_pool(slugs)
             return [{"label": m, "value": m} for m in records.pool_models(pool)]
         except Exception:
             logger.exception("corr model options failed")
@@ -97,7 +93,7 @@ def register_correlations_callbacks(app) -> None:
 
     @app.callback(
         Output("at-corr-filter-store", "data"),
-        Input("at-corr-dataset-dd", "value"),
+        Input("at-explorer-filter-store", "data"),
         Input("at-corr-models-dd", "value"),
         Input("at-corr-roles-cl", "value"),
         Input("at-corr-xscale-radio", "value"),
@@ -105,8 +101,10 @@ def register_correlations_callbacks(app) -> None:
         Input("at-corr-turnhi-input", "value"),
         prevent_initial_call=True,
     )
-    def coalesce_filters(slug, models, roles, xscale, turn_lo, turn_hi):
-        return {"slug": slug, "models": models or [], "roles": roles or [],
+    def coalesce_filters(explorer_filters, models, roles, xscale, turn_lo,
+                         turn_hi):
+        return {"slugs": (explorer_filters or {}).get("slugs") or [],
+                "models": models or [], "roles": roles or [],
                 "xscale": xscale, "turn_lo": turn_lo, "turn_hi": turn_hi}
 
     @app.callback(
@@ -225,7 +223,7 @@ def register_correlations_callbacks(app) -> None:
     def render(filters, axes, store, conv_selection, config):
         try:
             no_cursor = [""] * len(CHART_SLOTS)
-            if not filters or not filters.get("slug"):
+            if not (filters or {}).get("slugs"):
                 figs = [empty_figure("Correlations", "pick a dataset",
                                      height=None) for _ in CHART_SLOTS]
                 return (*figs, *no_cursor,
@@ -238,7 +236,7 @@ def register_correlations_callbacks(app) -> None:
             store = store or initial_store()
             log_x = filters["xscale"] == "log"
 
-            enriched = _enriched_rows(filters["slug"], conv_selection, config)
+            enriched = _enriched_rows(filters["slugs"], conv_selection, config)
             filtered, gates = filter_records(
                 enriched, {"models": filters["models"], "roles": filters["roles"]})
             def _num(v):  # number inputs can deliver strings; '' = unset

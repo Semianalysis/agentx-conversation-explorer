@@ -12,21 +12,34 @@ pip install -r requirements.txt
 python app.py            # -> http://localhost:8050
 ```
 
-The app opens on **Explorer**. Its Dataset panel lists the published datasets;
-pick one, then use **Download traces** on its card in the **Summary** tab if its
-traces are not cached yet. Traces are cached under `data/` (gitignored); every
-other tab reads only that cache.
+The app opens on **Explorer** with nothing loaded. Its Dataset panel is the
+working set — a list of the datasets this session has loaded, each with a tick
+box and an **×** to unload it. Four buttons fill it:
 
-Local exports are never listed until you load them: use **Load local export…**
-in the Explorer Dataset panel (or the Summary finder). **Export session** writes
-a small JSON of the source list — slugs, labels and where local exports came
-from, never trace data — and **Import session…** restores it, naming anything
-this machine no longer has.
+- **Browse published…** — the Summary finder, where you search the published
+  AgentX datasets, preview their stats and load one (use **Download traces** on
+  its Summary card if its traces are not cached yet).
+- **Local traces…** — pick an agent-trace file from this machine.
+- **Import session…** / **Export session** — restore or save the working set
+  (slugs, labels, where local traces came from, and which were ticked — never
+  trace data), so resuming brings back the view you exported, not just the
+  list. Importing names anything this machine no longer has rather than
+  skipping it.
+
+The first dataset you load is ticked for you and charts immediately; later ones
+join the list for you to tick, so a load never silently changes what you are
+looking at. **Tick more than one and they are explored together** — the
+conversation list names each row's dataset, and conversation numbers stay
+per-dataset, so two datasets can never collide. Unloading with × drops a
+dataset from the session; the cached copy on disk is kept.
+
+Traces are cached under `data/` (gitignored); every other tab reads only that
+cache.
 
 ## Tabs
 
-Every tab is a viewport onto the same state: the dataset, the conversation
-selection, and the serving assumptions are shared everywhere; per-tab controls
+Every tab is a viewport onto the same state: the working set of datasets and
+the conversation selection are shared everywhere; per-tab controls
 (measures, scales, filters, inspectors) are local views. Hover the ⓘ tags anywhere
 in the app for explanations of measures, columns, and controls.
 
@@ -68,8 +81,9 @@ Besides the AgentX datasets, the explorer can load an **OpenClaw trajectory
 export** — the `steps.csv` / `tools.csv` / `runs.csv` bundle produced from
 harness traces:
 
-**From the app:** the Explorer tab's Dataset panel has **Load local export…** —
-pick the export with the file dialog and it joins this session's sources.
+**From the app:** the Explorer tab's Dataset panel has **Local traces…** —
+pick the file with the dialog and it is imported, added to the working set and
+ticked, so it charts straight away.
 
 **From the command line:**
 
@@ -79,8 +93,8 @@ python -m modules.openclaw_import path/to/export.zip      # or a directory
 
 Imports stay on your machine: they are written to the local `data/` cache,
 which is gitignored, so a private dataset cannot be committed or published by
-accident. It writes the same local cache the AgentX importers use, so every tab works
-on it unchanged; pick it afterwards in the dataset dropdown. The mapping is
+accident. It writes the same local cache the AgentX importers use, so every tab
+works on it unchanged. The mapping is
 one conversation per agent lane and one turn per model call, with
 `cacheRead` as cached tokens and `cacheWrite + input` as the uncached tokens
 prefill actually computes. Pauses keep their timing (so the
@@ -91,7 +105,7 @@ counts are not represented — this app models turns, not tool execution.
 
 Operators who capture their own traces can point the explorer at additional
 HuggingFace sources. Set `AGENTX_INTERNAL=1` to reveal an "Internal sources"
-panel on the Overview tab; it lists the datasets of the namespaces in
+panel on the Summary tab; it lists the datasets of the namespaces in
 `AGENTX_HF_SOURCES` (comma-separated, default `semianalysisai`) and imports
 raw `cc-traces-weka`-format datasets locally. With a standard `HF_TOKEN` set,
 private datasets your token can read appear too — access always follows
