@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 from modules import api_client
 
@@ -109,7 +108,7 @@ def load_records(slug: str) -> list[dict]:
     if not files:
         raise FileNotFoundError(
             f"no cached conversations for dataset {slug!r} in {conv_dir} — "
-            f"use 'Download traces' on the Overview tab first"
+            f"load it from the Explorer Dataset panel first"
         )
     records: list[dict] = []
     for path in files:
@@ -119,6 +118,54 @@ def load_records(slug: str) -> list[dict]:
     logger.info("loaded %d records from %d conversations for %s", len(records), len(files), slug)
     _POOLS[slug] = records
     return records
+
+
+NS = "::"   # conv-id namespace separator: "<slug>::<conv_id>"
+
+
+def namespaced(slug: str, conv_id: str) -> str:
+    return f"{slug}{NS}{conv_id}"
+
+
+def split_conv_id(conv_id: str) -> tuple[str, str]:
+    """'<slug>::<id>' -> (slug, id). A bare id (no namespace) raises: every
+    multi-dataset path must carry its origin."""
+    slug, sep, rest = conv_id.partition(NS)
+    if not sep:
+        raise ValueError(f"conversation id {conv_id!r} carries no dataset")
+    return slug, rest
+
+
+def load_pool(slugs: list[str]) -> list[dict]:
+    """Records of SEVERAL datasets in one pool, conv ids namespaced by slug
+    so two datasets can never collide. Empty slug list -> [] (the caller
+    renders an empty state; loading nothing is not an error)."""
+    out: list[dict] = []
+    for slug in slugs or []:
+        for r in load_records(slug):
+            out.append({**r, "conv_id": namespaced(slug, r["conv_id"]),
+                        "uid": namespaced(slug, r["uid"]), "dataset": slug})
+    return out
+
+
+def merged_index(slugs: list[str]) -> list[str]:
+    """Namespaced conversation ids of several datasets, each dataset in its
+    own token-sorted order - so ordinals stay stable per dataset and unique
+    across them."""
+    out: list[str] = []
+    for slug in slugs or []:
+        out += [namespaced(slug, it["conv_id"])
+                for it in api_client.fetch_conversation_index(slug)]
+    return out
+
+
+def load_pool_activities(slugs: list[str]) -> dict[str, list[dict]]:
+    """Activity intervals of several datasets, keyed by namespaced conv id."""
+    out: dict[str, list[dict]] = {}
+    for slug in slugs or []:
+        for cid, acts in load_activities(slug).items():
+            out[namespaced(slug, cid)] = acts
+    return out
 
 
 def clear_pools() -> None:
@@ -145,6 +192,29 @@ def load_activities(slug: str) -> dict[str, list[dict]]:
             out[conv["conv_id"]] = acts
     _ACTIVITIES[slug] = out
     return out
+
+
+def has_main_agent(recs: list[dict]) -> bool:
+    return any(r["role"] == "main" for r in recs)
+
+
+def lane_turns(recs: list[dict], key=None) -> list[dict]:
+    """The conversation's own request lane, ordered.
+
+    Its MAIN-agent requests - or, for a lane that has none, its own requests.
+    A lane without a main agent is an OpenClaw subagent lane (AgentX subagents
+    nest under a main agent and never produce one), and it is a real
+    conversation with a real timeline, so every view summarizes it from the
+    requests it does have rather than each deciding separately to drop it.
+
+    key defaults to (turn_index, start_s); pass start_s alone for views that
+    care about wall-clock order.
+    """
+    if not recs:
+        raise ValueError("lane_turns on no records")
+    key = key or (lambda r: (r["turn_index"], r["start_s"]))
+    return sorted(recs if not has_main_agent(recs)
+                  else [r for r in recs if r["role"] == "main"], key=key)
 
 
 def pool_models(records: list[dict]) -> list[str]:

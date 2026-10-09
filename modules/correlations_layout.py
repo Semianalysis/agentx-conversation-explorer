@@ -78,15 +78,15 @@ def _measure_matrix() -> html.Div:
 
 def layout() -> html.Div:
     side = controls.sidebar([
-        controls.label("Dataset",
-                       info_text="The dataset is SHARED state: every tab is a "
-                                 "viewport onto the same data, and picking a "
-                                 "dataset here switches all tabs. An Explorer "
-                                 "conversation selection also scopes these "
-                                 "charts. Models, roles, measures, scale, and "
-                                 "the selections below are viewport options — "
-                                 "local to this tab."),
-        controls.dropdown("at-corr-dataset-dd", "pick a cached dataset"),
+        controls.label("Datasets",
+                       info_text="The working set is chosen in the Dataset "
+                                 "panel on Explorer and shared by every tab; "
+                                 "an Explorer conversation selection scopes "
+                                 "these charts too."),
+        html.Div(id="at-corr-dataset-echo",
+                 style={"fontSize": "11px", "color": "#333",
+                        "fontFamily": "Consolas, monospace",
+                        "whiteSpace": "pre-wrap", "marginBottom": "6px"}),
         controls.label("Models (empty = all)",
                        info_text="Restrict to requests served by specific "
                                  "models. Empty = every model in the dataset."),

@@ -45,17 +45,51 @@ class TestListOps(unittest.TestCase):
 
 
 class TestSessionFile(unittest.TestCase):
+    def _two(self):
+        return add(add([], make_source("w", WEBSITE, "Published set")),
+                   make_source("openclaw--x", LOCAL, "Mine", "C:/e.zip"))
+
     def test_roundtrip(self):
-        lst = add(add([], make_source("w", WEBSITE, "Published set")),
-                  make_source("openclaw--x", LOCAL, "Mine", "C:/e.zip"))
-        blob = export_blob(lst)
+        lst = self._two()
+        blob = export_blob(lst, ["w"])
         self.assertEqual(blob["schema"], SCHEMA)
-        self.assertEqual(parse_blob(blob), lst)
+        self.assertEqual(parse_blob(blob), (lst, ["w"]))
+
+    def test_resuming_restores_the_view_not_just_the_list(self):
+        """The whole point of the file: what you were charting comes back."""
+        lst = self._two()
+        for ticked in ([], ["w"], ["w", "openclaw--x"]):
+            self.assertEqual(parse_blob(export_blob(lst, ticked))[1], ticked)
+
+    def test_a_file_written_before_ticks_were_recorded_ticks_everything(self):
+        blob = export_blob(self._two(), ["w"])
+        del blob["active"]                      # a session file from bld 40
+        sources, ticked = parse_blob(blob)
+        self.assertEqual(ticked, [s["slug"] for s in sources])
+
+    def test_ticks_must_name_sources_the_file_carries(self):
+        with self.assertRaises(ValueError) as ctx:
+            export_blob(self._two(), ["not-in-the-list"])
+        self.assertIn("not in the session", str(ctx.exception))
+        blob = export_blob(self._two(), [])
+        blob["active"] = ["ghost"]
+        with self.assertRaises(ValueError) as ctx:
+            parse_blob(blob)
+        self.assertIn("does not list", str(ctx.exception))
+
+    def test_malformed_active_raises(self):
+        blob = export_blob(self._two(), [])
+        blob["active"] = "w"
+        with self.assertRaises(ValueError) as ctx:
+            parse_blob(blob)
+        self.assertIn("not a list", str(ctx.exception))
 
     def test_export_carries_no_trace_data(self):
         blob = export_blob([make_source("openclaw--x", LOCAL, "Mine", "e.zip")])
         self.assertEqual(set(blob["sources"][0]),
                          {"slug", "kind", "label", "path"})
+        self.assertEqual(set(blob) - {"schema", "version", "exported_at",
+                                      "sources", "active"}, set())
 
     def test_foreign_or_broken_files_raise_with_context(self):
         for bad, msg in (({"schema": "something/else", "version": 1,
