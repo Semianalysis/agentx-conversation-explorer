@@ -32,6 +32,66 @@ def _initial_cache_counts() -> dict:
             for d in _initial_datasets()}
 
 
+def _local_import_section() -> html.Div:
+    """Import an agent-trace export that lives on THIS machine. Always
+    available (it is the user's own file), and the import stays local: the
+    cache under data/ is gitignored, so nothing imported here can be
+    committed or published by accident."""
+    from modules.controls import info
+    return html.Div(
+        style={"marginTop": "22px", "borderTop": "1px solid #ddd",
+               "paddingTop": "10px"},
+        children=[
+            html.Div(["Import traces from this machine",
+                      info("Load an OpenClaw trajectory export (a zip "
+                           "containing steps.csv, or a folder holding it). "
+                           "Pick the file with the browser's file dialog, or "
+                           "paste a full path if the file is large or is a "
+                           "folder. The traces are flattened into the local "
+                           "cache under data/ - which is gitignored, so a "
+                           "private dataset stays on this machine and cannot "
+                           "be committed. Afterwards the dataset appears in "
+                           "the dataset dropdown on every tab.")],
+                     style={"fontWeight": "700", "fontSize": F_BASE,
+                            "display": "flex", "alignItems": "center"}),
+            html.Div(style={"display": "flex", "alignItems": "center",
+                            "gap": "14px", "margin": "8px 0",
+                            "flexWrap": "wrap"},
+                     children=[
+                         dcc.Upload(
+                             id="at-overview-upload",
+                             accept=".zip",
+                             multiple=False,
+                             children=html.Div(
+                                 ["Choose export file (.zip)"],
+                                 style={"padding": "8px 14px",
+                                        "border": "1px dashed #88a",
+                                        "borderRadius": "6px",
+                                        "background": "#f7f8ff",
+                                        "cursor": "pointer",
+                                        "fontSize": F_SMALL}),
+                         ),
+                         html.Span("or path:", style={"fontSize": F_SMALL,
+                                                      "color": "#666"}),
+                         dcc.Input(
+                             id="at-overview-import-path",
+                             type="text", debounce=True,
+                             placeholder=r"C:\path\to\export.zip (or a folder)",
+                             style={"width": "380px", "fontSize": F_SMALL}),
+                         html.Button("Import path",
+                                     id="at-overview-import-path-btn",
+                                     n_clicks=0,
+                                     style={"fontSize": F_SMALL,
+                                            "padding": "4px 10px"}),
+                         dcc.Loading(html.Div(id="at-overview-local-status",
+                                              style={"fontSize": F_SMALL,
+                                                     "color": "#555"}),
+                                     type="dot"),
+                     ]),
+        ],
+    )
+
+
 def _internal_section() -> html.Div:
     """Internal (unpublished) sources — rendered ONLY in internal mode
     (AGENTX_INTERNAL=1). The public build shows nothing: no names, no
@@ -135,6 +195,7 @@ def layout() -> html.Div:
                         style={"display": "flex", "flexWrap": "wrap", "gap": "14px",
                                "alignItems": "flex-start"},
                     ),
+                    _local_import_section(),
                     _internal_section(),
                 ],
             ),
