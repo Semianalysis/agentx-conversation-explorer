@@ -20,9 +20,11 @@ box and an **×** to unload it. Four buttons fill it:
   AgentX datasets, preview their stats and load one (use **Download traces** on
   its Summary card if its traces are not cached yet).
 - **Local traces…** — pick an agent-trace file from this machine.
-- **Import session…** / **Export session** — restore or save the list of
-  sources (slugs, labels and where local traces came from, never trace data).
-  Importing names anything this machine no longer has rather than skipping it.
+- **Import session…** / **Export session** — restore or save the working set
+  (slugs, labels, where local traces came from, and which were ticked — never
+  trace data), so resuming brings back the view you exported, not just the
+  list. Importing names anything this machine no longer has rather than
+  skipping it.
 
 The first dataset you load is ticked for you and charts immediately; later ones
 join the list for you to tick, so a load never silently changes what you are

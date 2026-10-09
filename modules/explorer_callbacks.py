@@ -174,15 +174,21 @@ def register_explorer_callbacks(app) -> None:
                 if not session_contents:
                     raise PreventUpdate
                 blob = json.loads(_decode_upload(session_contents))
-                restored = src.parse_blob(blob)
+                restored, was_ticked = src.parse_blob(blob)
                 available = _available_slugs()
                 present, missing = src.resolve(restored, available)
-                msg = f"session restored: {len(present)} source(s)"
+                here = {p_["slug"] for p_ in present}
+                ticks = [a for a in was_ticked if a in here]
+                msg = (f"session restored: {len(present)} source(s), "
+                       f"{len(ticks)} charted")
                 if missing:
                     msg += ("\nnot on this machine: "
                             + ", ".join(m["slug"] for m in missing)
-                            + " — load the trace file(s) again to re-add")
-                return present, msg, no_update
+                            + " \u2014 load the trace file(s) again to re-add")
+                lost = [a for a in was_ticked if a not in here]
+                if lost:
+                    msg += "\nwas charted but is missing: " + ", ".join(lost)
+                return present, msg, ticks
 
             if trig == "at-summary-load-btn":
                 detail = (found or {}).get("detail")
@@ -223,16 +229,17 @@ def register_explorer_callbacks(app) -> None:
         Output("at-sources-download", "data"),
         Input("at-explorer-export-session-btn", "n_clicks"),
         State("at-sources-store", "data"),
+        State("at-explorer-active-cl", "value"),
         prevent_initial_call=True,
     )
-    def export_session(n, current):
+    def export_session(n, current, ticked):
         from dash import dcc as _dcc
 
         from modules import sources as src
         try:
             if not n:
                 raise PreventUpdate
-            blob = src.export_blob(current or [])
+            blob = src.export_blob(current or [], ticked or [])
             return _dcc.send_string(json.dumps(blob, indent=1),
                                     "agentx-explorer-session.json")
         except PreventUpdate:

@@ -192,6 +192,11 @@ namespace conversation ids as "<slug>::<conv_id>" (records.namespaced /
 split_conv_id), so ordinals stay per-dataset and ids are unique across the
 set; the shared conversation list carries a 'dataset' column.
 
+A session file carries "active" (which sources were ticked), so Import
+restores the VIEW and not just the list; a file without that key (bld 40 and
+earlier) is NOT rejected - every source it lists is treated as ticked.
+sources.parse_blob returns (sources, ticked).
+
 records.lane_turns (bld 41) is THE definition of a conversation's lane - its
 main-agent requests, or its own requests when it has no main agent (an
 OpenClaw subagent lane). The list, the growth chart and the pause timeline all

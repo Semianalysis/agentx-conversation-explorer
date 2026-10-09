@@ -55,21 +55,38 @@ def slugs(sources: list[dict], kind: str | None = None) -> list[str]:
             if kind is None or s["kind"] == kind]
 
 
-def export_blob(sources: list[dict]) -> dict:
-    """The session file's contents. Carries only slugs, labels and the
-    export paths the user chose — never trace data."""
+def export_blob(sources: list[dict], active: list[str] | None = None) -> dict:
+    """The session file's contents. Carries only slugs, labels, the paths the
+    user picked and which sources were TICKED — never trace data.
+
+    'active' is what makes resuming restore the view and not merely the list.
+    A slug that is not in `sources` raises: a session that ticks something it
+    does not carry is a bug, not something to silently drop.
+    """
+    slugs = {s["slug"] for s in (sources or [])}
+    ticked = [a for a in (active or [])]
+    unknown = [a for a in ticked if a not in slugs]
+    if unknown:
+        raise ValueError(f"cannot export ticks for sources not in the "
+                         f"session: {unknown[:3]}")
     return {
         "schema": SCHEMA, "version": SCHEMA_VERSION,
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sources": [make_source(s["slug"], s["kind"], s.get("label", ""),
                                 s.get("path")) for s in (sources or [])],
+        "active": ticked,
     }
 
 
-def parse_blob(blob: dict) -> list[dict]:
-    """Session file -> source list. Raises with context on anything that is
-    not one of ours: a mistyped file should say so, not silently load zero
-    sources."""
+def parse_blob(blob: dict) -> tuple[list[dict], list[str]]:
+    """Session file -> (source list, ticked slugs). Raises with context on
+    anything that is not one of ours: a mistyped file should say so, not
+    silently load zero sources.
+
+    A file written before sessions recorded their ticks has no 'active' key;
+    every source it lists is treated as ticked, which is what those files
+    meant.
+    """
     if not isinstance(blob, dict):
         raise ValueError(f"session file is {type(blob).__name__}, not an object")
     if blob.get("schema") != SCHEMA:
@@ -81,8 +98,20 @@ def parse_blob(blob: dict) -> list[dict]:
     raw = blob.get("sources")
     if not isinstance(raw, list):
         raise ValueError("session file has no 'sources' list")
-    return [make_source(s.get("slug", ""), s.get("kind", ""),
-                        s.get("label", ""), s.get("path")) for s in raw]
+    sources = [make_source(s.get("slug", ""), s.get("kind", ""),
+                           s.get("label", ""), s.get("path")) for s in raw]
+    slugs = {s["slug"] for s in sources}
+    ticked = blob.get("active")
+    if ticked is None:
+        return sources, [s["slug"] for s in sources]
+    if not isinstance(ticked, list):
+        raise ValueError(f"session file 'active' is "
+                         f"{type(ticked).__name__}, not a list")
+    unknown = [a for a in ticked if a not in slugs]
+    if unknown:
+        raise ValueError(f"session file ticks sources it does not list: "
+                         f"{unknown[:3]}")
+    return sources, list(ticked)
 
 
 def resolve(sources: list[dict], available: set[str]) -> tuple[list[dict],
