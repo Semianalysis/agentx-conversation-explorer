@@ -50,9 +50,11 @@ in the app for explanations of measures, columns, and controls.
   cross-tab selection.
 - **Correlations** — three histograms with selectable measures (KV cache
   tokens, uncached input, decode output, idle before turn) over turn, time or
-  value bins. Click bars to build color-coded selections on one chart and see
-  how much of every bar on the other charts correlates, stacked by color, with
-  per-selection inspectors in the left panel.
+  value bins. **Click a bar and it takes the next of the seven SemiAnalysis
+  brand colors**; the other two charts stack that same color where those
+  requests land, so a colored section's size is how much of that bar
+  correlates. Click a selected bin again to release it. Per-selection
+  inspectors sit in the left panel.
 - **Deep-dive** — three scatter charts over a shared x measure (points, mean
   across conversations, or per-chart histograms), a click magnifier (5×) with
   cross-chart highlighting, a per-request point inspector, and **Export sweep

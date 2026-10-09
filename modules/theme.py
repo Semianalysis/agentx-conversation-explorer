@@ -17,6 +17,19 @@ PALETTE = [
     "#4c72b0", "#dd8452", "#55a868", "#c44e52", "#8172b3",
 ]
 
+# The SemiAnalysis brand palette: 7 vivid contrasts, the same list and the
+# same cycling order the Simulator uses (model_charts op_lookup.js
+# DISCOVERY_PALETTE), so a color means the same thing across our tools.
+BRAND_PALETTE = [
+    "#0B86D1",   # S2 Blue
+    "#26C9D8",   # S6 Cyan
+    "#2EAD8E",   # S3 Teal
+    "#E06347",   # S4 Coral
+    "#D1334A",   # S7 Crimson
+    "#BF49B5",   # S12 Magenta
+    "#979697",   # SA Metal
+]
+
 ROLE_COLORS = {"main": "#1f77b4", "subagent": "#ff7f0e"}
 
 HOVERLABEL = dict(
