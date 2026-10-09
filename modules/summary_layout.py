@@ -32,62 +32,58 @@ def _initial_cache_counts() -> dict:
             for d in _initial_datasets()}
 
 
-def _local_import_section() -> html.Div:
-    """Import an agent-trace export that lives on THIS machine. Always
-    available (it is the user's own file), and the import stays local: the
-    cache under data/ is gitignored, so nothing imported here can be
-    committed or published by accident."""
+def _finder_section() -> html.Div:
+    """Search for a dataset - published ones on the website, or exports
+    already cached on this machine - preview its stats, and load it into
+    this session. Nothing is loaded by browsing: the preview reads the
+    dataset card only, and the Load button is what adds it."""
     from modules.controls import info
     return html.Div(
-        style={"marginTop": "22px", "borderTop": "1px solid #ddd",
-               "paddingTop": "10px"},
+        style={"marginTop": "6px", "marginBottom": "18px",
+               "border": "1px solid #ddd", "borderRadius": "8px",
+               "padding": "12px", "background": "white"},
         children=[
-            html.Div(["Import traces from this machine",
-                      info("Load an OpenClaw trajectory export (a zip "
-                           "containing steps.csv, or a folder holding it). "
-                           "Pick the file with the browser's file dialog, or "
-                           "paste a full path if the file is large or is a "
-                           "folder. The traces are flattened into the local "
-                           "cache under data/ - which is gitignored, so a "
-                           "private dataset stays on this machine and cannot "
-                           "be committed. Afterwards the dataset appears in "
-                           "the dataset dropdown on every tab.")],
+            html.Div(["Find a dataset",
+                      info("Search the published AgentX datasets, or the "
+                           "exports already imported on this machine. "
+                           "Previewing shows the dataset's own summary "
+                           "stats; nothing enters the session until you "
+                           "press Load, which is what makes it appear in "
+                           "the dataset dropdowns.")],
                      style={"fontWeight": "700", "fontSize": F_BASE,
                             "display": "flex", "alignItems": "center"}),
-            html.Div(style={"display": "flex", "alignItems": "center",
-                            "gap": "14px", "margin": "8px 0",
+            html.Div(style={"display": "flex", "gap": "10px",
+                            "alignItems": "center", "margin": "8px 0",
                             "flexWrap": "wrap"},
                      children=[
-                         dcc.Upload(
-                             id="at-overview-upload",
-                             accept=".zip",
-                             multiple=False,
-                             children=html.Div(
-                                 ["Choose export file (.zip)"],
-                                 style={"padding": "8px 14px",
-                                        "border": "1px dashed #88a",
-                                        "borderRadius": "6px",
-                                        "background": "#f7f8ff",
-                                        "cursor": "pointer",
-                                        "fontSize": F_SMALL}),
-                         ),
-                         html.Span("or path:", style={"fontSize": F_SMALL,
-                                                      "color": "#666"}),
-                         dcc.Input(
-                             id="at-overview-import-path",
-                             type="text", debounce=True,
-                             placeholder=r"C:\path\to\export.zip (or a folder)",
-                             style={"width": "380px", "fontSize": F_SMALL}),
-                         html.Button("Import path",
-                                     id="at-overview-import-path-btn",
+                         dcc.RadioItems(
+                             id="at-summary-scope-radio",
+                             options=[{"label": " online (published)",
+                                       "value": "online"},
+                                      {"label": " local (on this machine)",
+                                       "value": "local"}],
+                             value="online", inline=True,
+                             labelStyle={"marginRight": "12px"},
+                             style={"fontSize": F_SMALL}),
+                         dcc.Input(id="at-summary-search-input", type="text",
+                                   debounce=True, placeholder="name contains…",
+                                   style={"width": "260px",
+                                          "fontSize": F_SMALL}),
+                         html.Button("Search", id="at-summary-search-btn",
                                      n_clicks=0,
                                      style={"fontSize": F_SMALL,
                                             "padding": "4px 10px"}),
-                         dcc.Loading(html.Div(id="at-overview-local-status",
-                                              style={"fontSize": F_SMALL,
-                                                     "color": "#555"}),
-                                     type="dot"),
+                         html.Button("Load into session",
+                                     id="at-summary-load-btn", n_clicks=0,
+                                     title="Add the previewed dataset to this "
+                                           "session's sources so it appears "
+                                           "in the dataset dropdowns.",
+                                     style={"fontSize": F_SMALL,
+                                            "padding": "4px 10px"}),
                      ]),
+            dcc.Store(id="at-summary-found-store"),
+            html.Div(id="at-summary-found-list"),
+            html.Div(id="at-summary-preview"),
         ],
     )
 
@@ -122,10 +118,10 @@ def _internal_section() -> html.Div:
                             "gap": "12px", "margin": "8px 0"},
                      children=[
                          html.Button("List internal datasets",
-                                     id="at-overview-hf-list-btn", n_clicks=0,
+                                     id="at-summary-hf-list-btn", n_clicks=0,
                                      style={"fontSize": F_SMALL,
                                             "padding": "4px 10px"}),
-                         dcc.Loading(html.Div(id="at-overview-hf-status",
+                         dcc.Loading(html.Div(id="at-summary-hf-status",
                                               style={"fontSize": F_SMALL,
                                                      "color": "#555"}),
                                      type="dot"),
@@ -134,43 +130,44 @@ def _internal_section() -> html.Div:
             # callback takes State from it, and Dash rejects callbacks that
             # reference ids missing from the layout (no
             # suppress_callback_exceptions here, deliberately)
-            dcc.Checklist(id="at-overview-hf-select-cl", options=[], value=[],
+            dcc.Checklist(id="at-summary-hf-select-cl", options=[], value=[],
                           labelStyle={"display": "block",
                                       "fontFamily": "Consolas, monospace",
                                       "fontSize": "12px"}),
-            html.Div(id="at-overview-hf-unsupported"),
+            html.Div(id="at-summary-hf-unsupported"),
             html.Div(style={"display": "flex", "alignItems": "center",
                             "gap": "12px", "marginTop": "8px"},
                      children=[
                          html.Button("Load selected",
-                                     id="at-overview-hf-load-btn", n_clicks=0,
+                                     id="at-summary-hf-load-btn", n_clicks=0,
                                      title="Import every checked dataset in "
                                            "the background (raw traces from "
                                            "HuggingFace; can take minutes "
                                            "per dataset).",
                                      style={"fontSize": F_SMALL,
                                             "padding": "4px 10px"}),
-                         html.Div(id="at-overview-hf-progress"),
+                         html.Div(id="at-summary-hf-progress"),
                      ]),
-            dcc.Interval(id="at-overview-hf-interval", interval=1000),
+            dcc.Interval(id="at-summary-hf-interval", interval=1000),
         ],
     )
 
 
 def layout() -> html.Div:
     return html.Div(
-        id="at-overview-tab",
+        id="at-summary-tab",
         style={"display": "flex", "flexDirection": "column", "height": "100%",
                "overflow": "hidden"},
         children=[
-            dcc.Store(id="at-overview-datasets-store", data=_initial_datasets()),
-            dcc.Store(id="at-overview-cache-store", data=_initial_cache_counts()),
+            dcc.Store(id="at-summary-datasets-store", data=_initial_datasets()),
+            dcc.Store(id="at-summary-cache-store", data=_initial_cache_counts()),
             html.Div(
                 style={"display": "flex", "alignItems": "center", "gap": "12px",
                        "padding": "10px 14px", "borderBottom": "1px solid #ddd",
                        "flex": "0 0 auto"},
                 children=[
-                    html.Button("Import / refresh datasets", id="at-overview-import-btn",
+                    html.Button("Refresh published datasets",
+                                id="at-summary-import-btn",
                                 n_clicks=0,
                                 title="Fetch the dataset list and summary "
                                       "stats from the AgentX API into the "
@@ -178,7 +175,7 @@ def layout() -> html.Div:
                                       "traces are downloaded separately with "
                                       "each dataset card's button.",
                                 style={"fontSize": F_BASE, "padding": "6px 14px"}),
-                    dcc.Loading(html.Div(id="at-overview-import-status",
+                    dcc.Loading(html.Div(id="at-summary-import-status",
                                          style={"fontSize": F_SMALL, "color": "#555"}),
                                 type="dot"),
                     html.Div("Source: inferencex.semianalysis.com/api/v1 → local cache in data/",
@@ -189,13 +186,16 @@ def layout() -> html.Div:
             html.Div(
                 style={"flex": "1 1 auto", "overflowY": "auto", "padding": "14px"},
                 children=[
-                    html.Div(id="at-overview-selection-summary"),
+                    _finder_section(),
+                    html.Div(id="at-summary-loaded-title",
+                             style={"fontWeight": "700", "fontSize": F_BASE,
+                                    "margin": "4px 0 8px"}),
+                    html.Div(id="at-summary-selection-summary"),
                     html.Div(
-                        id="at-overview-cards",
+                        id="at-summary-cards",
                         style={"display": "flex", "flexWrap": "wrap", "gap": "14px",
                                "alignItems": "flex-start"},
                     ),
-                    _local_import_section(),
                     _internal_section(),
                 ],
             ),

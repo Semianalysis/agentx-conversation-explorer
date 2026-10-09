@@ -3,7 +3,11 @@ cross-tab conversation selection.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import tempfile
+from pathlib import Path
 
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback_context, no_update
@@ -18,6 +22,23 @@ from modules.theme import color_for
 
 logger = logging.getLogger(__name__)
 
+
+def _decode_upload(contents: str) -> bytes:
+    """dcc.Upload 'data:<mime>;base64,<payload>' -> raw bytes."""
+    _, _, b64 = contents.partition(",")
+    return base64.b64decode(b64)
+
+
+def _write_upload(contents: str, filename: str) -> Path:
+    path = Path(tempfile.gettempdir()) / filename
+    path.write_bytes(_decode_upload(contents))
+    return path
+
+
+def _available_slugs() -> set[str]:
+    """Datasets this machine can actually open right now."""
+    return {p.parent.name for p in api_client.DATA_DIR.glob("*/detail.json")}
+
 # The dataset is GLOBAL state — every tab is a viewport onto the same data.
 # These dropdowns are views of ONE value, synced both ways.
 _DATASET_DDS = ("at-explorer-dataset-dd", "at-corr-dataset-dd",
@@ -29,22 +50,31 @@ _DATASET_DDS = ("at-explorer-dataset-dd", "at-corr-dataset-dd",
 DEFAULT_DATASET_SLUG = "cc-traces-weka-062126"
 
 
-def cached_dataset_options() -> list[dict]:
-    """Datasets with at least one cached conversation (dropdown options for
-    every tab that offers the shared dataset picker). Locally imported
-    internal (HF) datasets are included — they exist only on this user's
-    disk, so listing them exposes nothing in the public build."""
-    from modules import hf_client
+def cached_dataset_options(session_sources: list[dict] | None = None
+                           ) -> list[dict]:
+    """Dropdown options for the shared dataset picker.
+
+    PUBLISHED datasets (the AgentX registry) are always offered once their
+    traces are cached. A LOCAL import is offered only when this session's
+    source list names it, so private traces on this machine never appear by
+    themselves — the user loads them from the Dataset panel or the Summary
+    finder first.
+    """
+    from modules import hf_client, sources as src
     try:
-        datasets = list(api_client.fetch_datasets())
+        website = list(api_client.fetch_datasets())
     except Exception:
-        datasets = []
-    datasets += hf_client.local_hf_datasets()
+        website = []
+    wanted_local = set(src.slugs(session_sources or [], src.LOCAL))
+    local = [d for d in hf_client.local_hf_datasets()
+             if d["slug"] in wanted_local]
     opts = []
-    for d in datasets:
+    for d in website + local:
         n = len(api_client.cached_conversation_ids(d["slug"]))
         if n:
-            opts.append({"label": f"{d.get('label', d['slug'])} ({n} convs cached)",
+            mark = "" if src.source_kind(d) == src.WEBSITE else "  [local]"
+            opts.append({"label": f"{d.get('label', d['slug'])}{mark} "
+                                  f"({n} convs cached)",
                          "value": d["slug"]})
     return opts
 
@@ -148,12 +178,13 @@ def register_explorer_callbacks(app) -> None:
         Output("at-explorer-dataset-dd", "options"),
         Output("at-explorer-dataset-dd", "value"),
         Input("at-tabs", "value"),
-        Input("at-overview-cache-store", "data"),
+        Input("at-summary-cache-store", "data"),
+        Input("at-sources-store", "data"),
         State("at-explorer-dataset-dd", "value"),
     )
-    def dataset_options(_tab, _cache, current):
+    def dataset_options(_tab, _cache, session_sources, current):
         try:
-            opts = cached_dataset_options()
+            opts = cached_dataset_options(session_sources)
             slugs = {o["value"] for o in opts}
             if current in slugs:
                 value = current
@@ -164,6 +195,95 @@ def register_explorer_callbacks(app) -> None:
             return opts, value
         except Exception:
             logger.exception("explorer dataset options failed")
+            raise PreventUpdate
+
+    @app.callback(
+        Output("at-sources-store", "data"),
+        Output("at-explorer-sources-status", "children"),
+        Input("at-explorer-load-local", "contents"),
+        Input("at-explorer-load-session", "contents"),
+        Input("at-summary-load-btn", "n_clicks"),
+        State("at-explorer-load-local", "filename"),
+        State("at-explorer-load-session", "filename"),
+        State("at-summary-found-store", "data"),
+        State("at-sources-store", "data"),
+        prevent_initial_call=True,
+    )
+    def manage_sources(local_contents, session_contents, _load_clicks,
+                       local_name, session_name, found, current):
+        """THE owner of the session source list: a local export loaded from
+        the Dataset panel, a session file restored there, or a dataset the
+        Summary finder loaded all converge here."""
+        from modules import openclaw_import, sources as src
+        trig = callback_context.triggered_id
+        try:
+            if trig == "at-explorer-load-local":
+                if not local_contents:
+                    raise PreventUpdate
+                path = _write_upload(local_contents, local_name or "export.zip")
+                try:
+                    detail = openclaw_import.import_openclaw(path)
+                finally:
+                    path.unlink(missing_ok=True)
+                records.clear_pools()
+                out = src.add(current or [],
+                              src.make_source(detail["slug"], src.LOCAL,
+                                              detail.get("label", ""),
+                                              local_name))
+                return out, (f"loaded {detail['slug']}: "
+                             f"{detail['conversation_count']} conversations")
+
+            if trig == "at-explorer-load-session":
+                if not session_contents:
+                    raise PreventUpdate
+                blob = json.loads(_decode_upload(session_contents))
+                restored = src.parse_blob(blob)
+                available = _available_slugs()
+                present, missing = src.resolve(restored, available)
+                msg = f"session restored: {len(present)} source(s)"
+                if missing:
+                    msg += ("\nnot on this machine: "
+                            + ", ".join(m["slug"] for m in missing)
+                            + " — load the export(s) again to re-add")
+                return present, msg
+
+            if trig == "at-summary-load-btn":
+                detail = (found or {}).get("detail")
+                if not detail:
+                    raise PreventUpdate
+                from modules import sources as s2
+                out = s2.add(current or [],
+                             s2.make_source(detail["slug"],
+                                            s2.source_kind(detail),
+                                            detail.get("label", "")))
+                return out, f"added {detail['slug']} to this session"
+            raise PreventUpdate
+        except PreventUpdate:
+            raise
+        except Exception as e:
+            logger.exception("source management failed")
+            return no_update, f"FAILED: {e}"
+
+    @app.callback(
+        Output("at-sources-download", "data"),
+        Input("at-explorer-export-session-btn", "n_clicks"),
+        State("at-sources-store", "data"),
+        prevent_initial_call=True,
+    )
+    def export_session(n, current):
+        from dash import dcc as _dcc
+
+        from modules import sources as src
+        try:
+            if not n:
+                raise PreventUpdate
+            blob = src.export_blob(current or [])
+            return _dcc.send_string(json.dumps(blob, indent=1),
+                                    "agentx-explorer-session.json")
+        except PreventUpdate:
+            raise
+        except Exception:
+            logger.exception("session export failed")
             raise PreventUpdate
 
     @app.callback(

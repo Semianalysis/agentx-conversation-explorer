@@ -11,7 +11,7 @@ from dash import Dash, Input, Output, dcc, html
 
 from modules import (correlations_callbacks, correlations_layout,
                      deepdive_callbacks, deepdive_layout, explorer_callbacks,
-                     explorer_layout, overview_callbacks, overview_layout,
+                     explorer_layout, summary_callbacks, summary_layout,
                      pause_callbacks, pause_layout)
 from modules.theme import F_BASE
 from modules.version import APP_BUILD
@@ -19,12 +19,15 @@ from modules.version import APP_BUILD
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+# Explorer opens the app: it is where work starts. Summary sits at the end -
+# it reports on what is already loaded (and finds more), rather than being a
+# landing page.
 _TABS = [
-    ("overview", "Overview"),
     ("explorer", "Explorer"),
     ("correlations", "Correlations"),
     ("deepdive", "Deep-dive"),
     ("pauses", "Pause Analytics"),
+    ("summary", "Summary"),
 ]
 
 _APP_NAME = f"AgentX Conversation Explorer bld {APP_BUILD}"
@@ -41,6 +44,11 @@ app.layout = html.Div(
         # here, just before DataTable updates sort_by (see _register_sort_semantics)
         dcc.Input(id="at-sort-ctrl-input", type="text", value="0",
                   style={"display": "none"}),
+        # which datasets this session is working with (see modules/sources.py):
+        # published ones are offered by default, local imports only once the
+        # user brings them in
+        dcc.Store(id="at-sources-store", data=[]),
+        dcc.Download(id="at-sources-download"),
         html.Div(
             style={"display": "flex", "alignItems": "center", "gap": "18px",
                    "padding": "8px 14px 0", "borderBottom": "1px solid #ccc",
@@ -50,7 +58,7 @@ app.layout = html.Div(
                          style={"fontWeight": "700", "fontSize": "17px",
                                 "whiteSpace": "nowrap"}),
                 dcc.Tabs(
-                    id="at-tabs", value="overview",
+                    id="at-tabs", value="explorer",
                     style={"height": "36px", "width": "900px"},
                     children=[dcc.Tab(label=lbl, value=val,
                                       style={"padding": "8px", "fontSize": F_BASE},
@@ -61,15 +69,15 @@ app.layout = html.Div(
                 ),
             ],
         ),
-        html.Div(overview_layout.layout(), id="at-tabwrap-overview",
-                 style={"flex": "1 1 auto", "minHeight": "0"}),
         html.Div(explorer_layout.layout(), id="at-tabwrap-explorer",
-                 style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
+                 style={"flex": "1 1 auto", "minHeight": "0"}),
         html.Div(correlations_layout.layout(), id="at-tabwrap-correlations",
                  style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
         html.Div(deepdive_layout.layout(), id="at-tabwrap-deepdive",
                  style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
         html.Div(pause_layout.layout(), id="at-tabwrap-pauses",
+                 style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
+        html.Div(summary_layout.layout(), id="at-tabwrap-summary",
                  style={"flex": "1 1 auto", "minHeight": "0", "display": "none"}),
     ],
 )
@@ -89,7 +97,7 @@ def switch_tab(active):
     return styles
 
 
-overview_callbacks.register_overview_callbacks(app)
+summary_callbacks.register_summary_callbacks(app)
 explorer_callbacks.register_explorer_callbacks(app)
 correlations_callbacks.register_correlations_callbacks(app)
 deepdive_callbacks.register_deepdive_callbacks(app)
