@@ -42,7 +42,8 @@ def build_conversation_table(
           compaction, not accumulated into context)}.
 
     models_filter: keep conversations that used ANY of the given models.
-    Returns (rows sorted by ordinal, n_skipped_no_main_turns). A conversation
+    Returns (rows sorted by ordinal, n_subagent_only_conversations — those
+    are still listed, summarized from their subagent requests). A conversation
     whose conv_id is missing from the index raises — the index must cover the
     pool (same dataset), anything else is a data bug.
     """
@@ -61,7 +62,13 @@ def build_conversation_table(
             continue
         main = _main_turns_ordered(recs)
         if not main:
+            # A conversation whose every request is a subagent's own (an
+            # OpenClaw subagent lane; never an AgentX conversation, where
+            # subagents nest under a main agent). Summarize it from those
+            # requests instead of dropping half the dataset from the list.
+            main = sorted(recs, key=lambda r: (r["turn_index"], r["start_s"]))
             skipped_no_main += 1
+        if not main:
             continue
         rows.append({
             "id": cid,
