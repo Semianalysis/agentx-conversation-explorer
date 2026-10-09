@@ -29,6 +29,33 @@ def dropdown(id_: str, placeholder: str, multi: bool = False, **kwargs) -> dcc.D
                         style={"fontSize": F_SMALL}, **kwargs)
 
 
+def card(title: str, rows: list[tuple], info_text: str | None = None) -> html.Div:
+    """Right-column summary card. rows are (key, value) or
+    (key, value, hover-help)."""
+    from modules.theme import MONO
+    title_children: list = [title]
+    if info_text:
+        title_children.append(info(info_text))
+    row_divs = []
+    for row in rows:
+        k, v = row[0], row[1]
+        tip = row[2] if len(row) > 2 else None
+        row_divs.append(html.Div(
+            style={"display": "flex", "justifyContent": "space-between",
+                   "fontSize": "12px", "gap": "10px"},
+            children=[html.Span([k, info(tip)] if tip else k,
+                                style={"color": "#666"}),
+                      html.Span(v, style={"fontFamily": MONO})]))
+    return html.Div(
+        style={"border": "1px solid #ddd", "borderRadius": "6px",
+               "padding": "10px", "marginBottom": "10px", "background": "white"},
+        children=[html.Div(title_children,
+                           style={"fontWeight": "600", "fontSize": F_SMALL,
+                                  "marginBottom": "6px", "display": "flex",
+                                  "alignItems": "center"})] + row_divs,
+    )
+
+
 def sidebar(children: list) -> html.Div:
     return html.Div(
         style={"flex": f"0 0 {LEFT_W}", "minWidth": "0", "maxWidth": LEFT_W,

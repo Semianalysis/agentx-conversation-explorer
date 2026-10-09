@@ -120,6 +120,21 @@ The positional sum mode and bin_weighted are deleted. Internal panel bld 26:
 checkbox selection + one background 'Load selected' (thread + 1 Hz dcc.Interval
 progress bar + Done message; hf_client._BG state).
 
+Pause Analytics tab (bld 39): a PAUSE is dead air on a conversation's
+main-agent lane (frontier of the lane's last activity -> next request start;
+a subagent-only lane uses its own requests). modules/pause_data.py decomposes
+each pause EXACTLY into causes - 'subagent' from the trace structure, tool
+categories from imported activity intervals, 'unknown' as the remainder -
+asserting sum(causes) == duration, so stacked bars always equal the bar's
+time and unknown is never a fudge. Two charts share ONE set of duration bin
+edges (duration_bins) so stacked causes align with the ISL delivered when
+the pause ended; sidebar picks min pause, bin scale, time-vs-count stacking,
+which causes to stack, and which ISL measure. openclaw_import now also reads
+tools.csv into per-conversation 'activities' (lane-relative category
+intervals), loaded by records.load_activities; AgentX datasets have none, so
+their pauses are honestly subagent-or-unknown. controls.card is the shared
+right-column card (Deep-dive + Pauses).
+
 OpenClaw imports (bld 37): modules/openclaw_import.py turns a colleague's
 OpenClaw trajectory export (steps.csv in a zip or dir) into the standard local
 cache — one conversation per agent LANE (session_id), one turn per model call,

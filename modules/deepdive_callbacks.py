@@ -414,28 +414,8 @@ def _finish_measure_figure(fig: go.Figure, title: str, xm: dict, ym: dict) -> go
 
 
 def _card(title: str, rows: list[tuple], info_text: str | None = None) -> html.Div:
-    """Summary card. rows are (key, value) or (key, value, hover-help)."""
-    title_children: list = [title]
-    if info_text:
-        title_children.append(controls.info(info_text))
-    row_divs = []
-    for row in rows:
-        k, v = row[0], row[1]
-        tip = row[2] if len(row) > 2 else None
-        row_divs.append(html.Div(
-            style={"display": "flex", "justifyContent": "space-between",
-                   "fontSize": "12px", "gap": "10px"},
-            children=[html.Span([k, controls.info(tip)] if tip else k,
-                                style={"color": "#666"}),
-                      html.Span(v, style={"fontFamily": MONO})]))
-    return html.Div(
-        style={"border": "1px solid #ddd", "borderRadius": "6px", "padding": "10px",
-               "marginBottom": "10px", "background": "white"},
-        children=[html.Div(title_children,
-                           style={"fontWeight": "600", "fontSize": F_SMALL,
-                                  "marginBottom": "6px", "display": "flex",
-                                  "alignItems": "center"})] + row_divs,
-    )
+    """Summary card - the shared implementation (Pause Analytics uses it too)."""
+    return controls.card(title, rows, info_text)
 
 
 def _interval_inspector(per_request: list[dict], axes: dict,

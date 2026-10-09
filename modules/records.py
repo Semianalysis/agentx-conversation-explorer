@@ -123,6 +123,28 @@ def load_records(slug: str) -> list[dict]:
 
 def clear_pools() -> None:
     _POOLS.clear()
+    _ACTIVITIES.clear()
+
+
+_ACTIVITIES: dict[str, dict[str, list[dict]]] = {}
+
+
+def load_activities(slug: str) -> dict[str, list[dict]]:
+    """{conv_id: [{category, start_s, end_s}]} for datasets whose import
+    carried them (OpenClaw exports). AgentX datasets have none, so this is
+    {} there and every pause stays honestly 'unknown'. Memoized per slug."""
+    if slug in _ACTIVITIES:
+        return _ACTIVITIES[slug]
+    conv_dir = api_client.conversation_dir(slug)
+    out: dict[str, list[dict]] = {}
+    for path in sorted(conv_dir.glob("*.json")) if conv_dir.is_dir() else []:
+        with open(path, encoding="utf-8") as f:
+            conv = json.load(f)
+        acts = conv.get("activities")
+        if acts:
+            out[conv["conv_id"]] = acts
+    _ACTIVITIES[slug] = out
+    return out
 
 
 def pool_models(records: list[dict]) -> list[str]:
