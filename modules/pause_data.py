@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import math
 
+from modules.records import has_main_agent, lane_turns
+
 UNKNOWN = "unknown"
 SUBAGENT = "subagent"
 _EPS = 1e-6
@@ -89,12 +91,9 @@ def conversation_pauses(records: list[dict],
     """
     if not records:
         raise ValueError("conversation_pauses on no records")
-    lane = sorted((r for r in records if r["role"] == "main"),
-                  key=lambda r: r["start_s"])
-    if not lane:
-        lane = sorted(records, key=lambda r: r["start_s"])
-    off_lane = [r for r in records if r["role"] != "main"] if any(
-        r["role"] == "main" for r in records) else []
+    lane = lane_turns(records, key=lambda r: r["start_s"])
+    off_lane = ([r for r in records if r["role"] != "main"]
+                if has_main_agent(records) else [])
     acts = activities or []
 
     out = []

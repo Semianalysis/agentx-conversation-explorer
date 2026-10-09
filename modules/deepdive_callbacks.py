@@ -130,12 +130,12 @@ def register_deepdive_callbacks(app) -> None:
     )
     def render(selection, config, filters, axes, zoom, point):
         try:
-            slug = (filters or {}).get("slug")
-            if not slug:
+            slugs = (filters or {}).get("slugs") or []
+            if not slugs:
                 fig = empty_figure("Conversation deep-dive",
-                                   "pick a dataset on Explorer", height=None)
+                                   "load a dataset on Explorer", height=None)
                 return fig, fig, fig, html.Div(
-                    "pick a dataset", style={"color": "#777", "fontSize": F_SMALL})
+                    "load a dataset", style={"color": "#777", "fontSize": F_SMALL})
             axes = axes or {}
             for name in ("x", "y1", "y2", "y3"):
                 if axes.get(name) not in ALL_MEASURES:
@@ -143,12 +143,11 @@ def register_deepdive_callbacks(app) -> None:
             arch_key, _gpu_key, cfg = resolve_assumptions(config)
             arch = ARCHITECTURES[arch_key]
 
-            pool = records.load_records(slug)
-            index_ids = [it["conv_id"] for it in api_client.fetch_conversation_index(slug)]
+            pool = records.load_pool(slugs)
+            index_ids = records.merged_index(slugs)
             rows, _ = build_conversation_table(pool, index_ids, None)
             ordinal = {r["id"]: r["ordinal"] for r in rows}
-            sel_ids = list((selection or {}).get("conv_ids") or []) \
-                if (selection or {}).get("slug") == slug else []
+            sel_ids = list((selection or {}).get("conv_ids") or [])
             all_selected = not sel_ids
             conv_ids = sel_ids or list(ordinal)
 
@@ -245,27 +244,28 @@ def register_deepdive_callbacks(app) -> None:
         try:
             if not n:
                 raise PreventUpdate
-            slug = (filters or {}).get("slug")
+            slugs = (filters or {}).get("slugs") or []
             axes = axes or {}
-            if not slug or axes.get("x") not in X_MEASURES:
+            if not slugs or axes.get("x") not in X_MEASURES:
                 raise PreventUpdate
             import json as _json
 
             from dash import dcc as _dcc
             arch_key, _g, cfg = resolve_assumptions(config)
-            pool = records.load_records(slug)
-            index_ids = [it["conv_id"]
-                         for it in api_client.fetch_conversation_index(slug)]
+            pool = records.load_pool(slugs)
+            index_ids = records.merged_index(slugs)
             ordinal = {cid: i + 1 for i, cid in enumerate(index_ids)}
-            sel_ids = list((selection or {}).get("conv_ids") or [])                 if (selection or {}).get("slug") == slug else []
+            live = set(slugs)
+            sel_ids = [cid for cid in ((selection or {}).get("conv_ids") or [])
+                       if records.split_conv_id(cid)[0] in live]
             agg = aggregate_selection(pool, sel_ids or index_ids,
                                       ARCHITECTURES[arch_key], cfg, ordinal)
             sweep = sweep_points(agg["per_request"], axes["x"])
-            sweep.update(dataset=slug,
+            sweep.update(dataset=", ".join(slugs),
                          selection=f"{len(sel_ids) or 'all'} conversations")
             return _dcc.send_string(
                 _json.dumps(sweep, indent=1),
-                f"sweep-{slug}-{axes['x']}.json")
+                f"sweep-{'+'.join(slugs)}-{axes['x']}.json")
         except PreventUpdate:
             raise
         except Exception:

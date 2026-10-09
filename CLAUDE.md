@@ -19,23 +19,25 @@ Independent project — it imitates the InferenceX Explorer tab of
   session's working set is a SOURCE LIST (modules/sources.py, at-sources-store,
   owned by explorer_callbacks.manage_sources): entries are
   {slug, kind: website|local, label, path}. The Explorer Dataset mini-panel
-  carries the controls at the TOP: "Load local export…" (file dialog ->
-  openclaw_import -> adds a local source), "Import session…" (restores an
-  exported source list, REPORTING any source this machine lacks rather than
-  dropping it), and "Export session" (downloads slugs/labels/paths only -
-  never trace data). Summary also has a finder: search online (AgentX
-  registry) or local (imported exports), preview a dataset's own stats, then
-  "Load into session".
+  carries the controls at the TOP: "Browse published…" (jumps to the Summary
+  finder), "Local traces…" (file dialog -> openclaw_import -> adds a local
+  source), "Import session…" (restores an exported source list, REPORTING any
+  source this machine lacks rather than dropping it), and "Export session"
+  (downloads slugs/labels/paths only - never trace data). The Summary finder
+  searches online (AgentX registry) or local (imported traces), previews a
+  dataset's own stats, then "Load into session". See "Working set (bld 41)"
+  below for the list that replaced the dropdowns.
 
 - **One state, many viewports (standing principle, restated by the user 2026-08-29).**
-  Dataset, conversation selection, and serving assumptions are GLOBAL — switching
-  tabs retains them. The dataset dropdowns on Explorer/Correlations are synced views
-  of ONE value (sync_updates + self-loop callback in explorer_callbacks); the
-  conversation selection store and assumption config flow from Explorer everywhere.
+  The working set of datasets and the conversation selection are GLOBAL —
+  switching tabs retains them. Since bld 41 the working set is a LIST of
+  slugs, chosen in the Explorer Dataset panel and published on
+  at-explorer-filter-store; other tabs echo it read-only. The conversation
+  selection store flows from Explorer everywhere.
   Everything else a tab offers is a VIEWPORT option local to that tab: axis/measure
   choices, log/linear scales, role and model filters, correlation
   inspectors/selections, list sort/filter.
-- **Overview tab** — import trace data, summarize the datasets found (counts, token totals,
+- **Summary tab** (named Overview until bld 40) - summarize the LOADED datasets (counts, token totals,
   model mix, cached fraction). When an Explorer selection exists, a selection-scoped
   summary card renders above the dataset cards.
 - **Explorer tab** (added 2026-08-27) — the main working view: one growth curve per
@@ -163,6 +165,30 @@ build_conversation_table now summarizes subagent-only conversations from their
 own turns instead of dropping them; the second return value counts them.
 hf_client.local_hf_datasets() lists any cached detail.json carrying a "source"
 key, so every locally imported dataset (hf-- and openclaw--) shows up.
+
+Working set (bld 41): the dataset is no longer ONE slug - it is a LIST.
+The Explorer Dataset panel shows the loaded datasets as a visible list (tick
+box + label + conversation count + x to unload), fed by four buttons: Browse
+published... (jumps to the Summary finder, so there is only ever one search
+UI), Local traces... (the old 'Load local export' - export is an action, not
+a thing a user has), Import session..., Export session. A newly loaded source
+is TICKED automatically, so loading always visibly does something. Every tab
+reads at-explorer-filter-store {"slugs": [...]}; the other tabs show the
+working set read-only (at-{corr,pause}-dataset-echo) - there are no dataset
+dropdowns left. records.load_pool / merged_index / load_pool_activities
+namespace conversation ids as "<slug>::<conv_id>" (records.namespaced /
+split_conv_id), so ordinals stay per-dataset and ids are unique across the
+set; the shared conversation list carries a 'dataset' column.
+
+records.lane_turns (bld 41) is THE definition of a conversation's lane - its
+main-agent requests, or its own requests when it has no main agent (an
+OpenClaw subagent lane). The list, the growth chart and the pause timeline all
+read it; they used to decide separately and disagreed (573 conversations
+listed, 479 curves drawn).
+
+An EMPTY conv_ids list in at-explorer-selection-store means EVERY conversation
+(the Explorer writes [] whenever nothing is ticked). Reading it as "select
+nothing" is what left the Pause tab blank at bld 40.
 
 Internal sources (bld 25): AGENTX_INTERNAL=1 reveals the Overview "Internal
 sources" panel (HF org listings via AGENTX_HF_SOURCES, private access via the

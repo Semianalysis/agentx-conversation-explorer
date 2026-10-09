@@ -30,6 +30,7 @@ _GROUPED = {"specifier": ","}
 # Shared by the Explorer and Deep-dive conversation lists (one source of truth).
 TABLE_COLUMNS = [
     {"name": "#", "id": "ordinal", "type": "numeric"},
+    {"name": "dataset", "id": "dataset", "type": "text"},
     {"name": "model", "id": "model", "type": "text"},
     {"name": "turns", "id": "n_turns", "type": "numeric", "format": _GROUPED},
     {"name": "initial ISL", "id": "isl0", "type": "numeric", "format": _GROUPED},
@@ -47,6 +48,10 @@ COLUMN_TOOLTIPS = {
     "ordinal": "Conversation number — its rank in the dataset's token-sorted "
                "index (1 = most total input tokens). Stable identity for the "
                "conversation everywhere in the app.",
+    "dataset": "Which loaded dataset this conversation came from. Tick "
+               "several datasets in the Explorer Dataset panel and they are "
+               "listed together here; sort or filter on this column to work "
+               "with one of them.",
     "model": "Main-agent model of the conversation (subagent requests may use "
              "other models).",
     "n_turns": "Main-agent requests in the conversation. Subagent requests "
@@ -73,52 +78,64 @@ TABLE_TOOLTIP_KWARGS = dict(tooltip_header=COLUMN_TOOLTIPS, tooltip_delay=400,
 
 def layout() -> html.Div:
     side = controls.sidebar([
-        controls.label("Dataset",
-                       info_text="The dataset is SHARED state: every tab is a "
-                                 "viewport onto the same data, and picking a "
-                                 "dataset here switches all of them. The list "
-                                 "offers the PUBLISHED datasets by default; a "
-                                 "dataset imported from this machine appears "
-                                 "only once you load it below, so private "
-                                 "traces are never surfaced on their own. "
-                                 "Browse and preview more on the Summary tab."),
-        controls.dropdown("at-explorer-dataset-dd", "pick a dataset"),
+        controls.label("Datasets",
+                       info_text="The working set, shared by every tab. Tick "
+                                 "one or more to chart them together; the "
+                                 "first one you load is ticked for you. X "
+                                 "unloads a dataset from the session (the "
+                                 "local cache is untouched). Published "
+                                 "datasets and traces from this machine load "
+                                 "the same way - browse the published ones, "
+                                 "or pick a local trace file."),
         html.Div(style={"display": "flex", "gap": "6px", "flexWrap": "wrap",
-                        "margin": "6px 0 2px", "alignItems": "center"},
+                        "margin": "2px 0 6px", "alignItems": "center"},
                  children=[
+                     html.Button("Browse published…",
+                                 id="at-explorer-browse-btn", n_clicks=0,
+                                 title="Open the Summary finder to search "
+                                       "the published AgentX datasets, "
+                                       "preview their stats and load one.",
+                                 style={"fontSize": "11px",
+                                        "padding": "3px 8px"}),
                      dcc.Upload(
                          id="at-explorer-load-local",
                          accept=".zip", multiple=False,
                          children=html.Button(
-                             "Load local export…",
-                             title="Pick an agent-trace export (.zip) from "
-                                   "this machine. It is flattened into the "
-                                   "gitignored local cache and added to this "
-                                   "session's sources - it never leaves the "
-                                   "machine.",
-                             style={"fontSize": "11px", "padding": "3px 8px"})),
+                             "Local traces…",
+                             title="Pick an agent-trace file (.zip) from this "
+                                   "machine. It is flattened into the "
+                                   "gitignored local cache, loaded, and "
+                                   "ticked - it never leaves the machine.",
+                             style={"fontSize": "11px",
+                                    "padding": "3px 8px"})),
                      dcc.Upload(
                          id="at-explorer-load-session",
                          accept=".json", multiple=False,
                          children=html.Button(
                              "Import session…",
-                             title="Restore a source list exported earlier: "
-                                   "the datasets it names are re-activated "
-                                   "for this session. Sources whose cache is "
-                                   "missing on this machine are reported, not "
-                                   "silently skipped.",
-                             style={"fontSize": "11px", "padding": "3px 8px"})),
+                             title="Restore a working set saved earlier. "
+                                   "Datasets this machine no longer has are "
+                                   "named, not silently skipped.",
+                             style={"fontSize": "11px",
+                                    "padding": "3px 8px"})),
                      html.Button("Export session",
-                                 id="at-explorer-export-session-btn", n_clicks=0,
-                                 title="Download this session's source list "
-                                       "(slugs, labels, and where local "
-                                       "exports came from - never trace data) "
-                                       "so tomorrow starts where today ended.",
-                                 style={"fontSize": "11px", "padding": "3px 8px"}),
+                                 id="at-explorer-export-session-btn",
+                                 n_clicks=0,
+                                 title="Save this working set (slugs, labels "
+                                       "and where local traces came from - "
+                                       "never trace data).",
+                                 style={"fontSize": "11px",
+                                        "padding": "3px 8px"}),
                  ]),
+        dcc.Checklist(id="at-explorer-active-cl", options=[], value=[],
+                      style={"display": "none"}),
+        html.Div(id="at-explorer-loaded-list",
+                 style={"border": "1px solid #ddd", "borderRadius": "6px",
+                        "background": "white", "padding": "4px 6px",
+                        "minHeight": "34px"}),
         html.Div(id="at-explorer-sources-status",
                  style={"fontSize": "11px", "color": "#666",
-                        "whiteSpace": "pre-wrap", "marginBottom": "4px"}),
+                        "whiteSpace": "pre-wrap", "margin": "4px 0"}),
         controls.label("Chart x measure",
                        info_text="X axis of the growth chart. turn count = "
                                  "main-agent turn ordinal (1..n). cumulative "

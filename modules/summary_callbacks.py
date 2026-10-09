@@ -1,4 +1,4 @@
-"""Overview tab callbacks: import datasets, bulk-download traces, render cards."""
+"""Summary tab callbacks: find datasets, bulk-download traces, render cards."""
 from __future__ import annotations
 
 import logging
@@ -234,12 +234,12 @@ def register_summary_callbacks(app) -> None:
         subset (computed from the cached records, same fields as the dataset
         cards) above the full-dataset cards."""
         try:
-            slug = (selection or {}).get("slug")
+            slugs = (selection or {}).get("slugs") or []
             conv_ids = (selection or {}).get("conv_ids") or []
-            if not slug or not conv_ids:
+            if not slugs or not conv_ids:
                 return None
-            pool = records.load_records(slug)
-            subset, _ = apply_selection(pool, selection, slug)
+            pool = records.load_pool(slugs)
+            subset, _ = apply_selection(pool, selection, slugs)
             if not subset:
                 return None
             n_main = sum(1 for r in subset if r["role"] == "main")
@@ -255,7 +255,7 @@ def register_summary_callbacks(app) -> None:
                        "maxWidth": "1134px"},
                 children=[
                     html.H3(f"Explorer selection — {len(conv_ids)} conversations "
-                            f"of {slug}", style={"margin": "0 0 8px"}),
+                            f"of {', '.join(slugs)}", style={"margin": "0 0 8px"}),
                     html.Div(style={"display": "grid",
                                     "gridTemplateColumns": "1fr 1fr 1fr",
                                     "gap": "4px 24px", "fontSize": F_SMALL,

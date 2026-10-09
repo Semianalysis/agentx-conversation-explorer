@@ -23,12 +23,15 @@ ISL_MEASURES = {
 
 def layout() -> html.Div:
     side = controls.sidebar([
-        controls.label("Dataset",
-                       info_text="Shared with every tab: picking a dataset "
-                                 "here switches all of them. An Explorer "
-                                 "conversation selection also scopes these "
-                                 "pauses."),
-        controls.dropdown("at-pause-dataset-dd", "pick a cached dataset"),
+        controls.label("Datasets",
+                       info_text="The working set is chosen in the Dataset "
+                                 "panel on Explorer and shared by every tab; "
+                                 "an Explorer conversation selection scopes "
+                                 "these charts too."),
+        html.Div(id="at-pause-dataset-echo",
+                 style={"fontSize": "11px", "color": "#333",
+                        "fontFamily": "Consolas, monospace",
+                        "whiteSpace": "pre-wrap", "marginBottom": "6px"}),
         controls.label("Minimum pause (s)",
                        info_text="Ignore pauses shorter than this. Sub-second "
                                  "gaps between back-to-back requests are "

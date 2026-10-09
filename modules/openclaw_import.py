@@ -305,7 +305,8 @@ def main() -> None:
           f"{s['mainTurns'] + s['subagentTurns']:,} model calls, "
           f"{s.get('activityIntervals', 0):,} tool intervals, "
           f"{d['skipped_rows']} rows skipped")
-    print("pick it in the dataset dropdown on Explorer or Correlations")
+    print("tick it in the Explorer Dataset panel (it is already in the "
+          "local cache)")
 
 
 if __name__ == "__main__":

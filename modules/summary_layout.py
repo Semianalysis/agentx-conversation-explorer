@@ -1,4 +1,4 @@
-"""Overview tab layout: import bar + dataset summary cards.
+"""Summary tab layout: dataset finder + summary cards for what is loaded.
 
 All Overview dcc.Stores live here. The datasets store is pre-populated from the
 disk cache at app start (no network at import time — cache reads only).
@@ -48,8 +48,8 @@ def _finder_section() -> html.Div:
                            "exports already imported on this machine. "
                            "Previewing shows the dataset's own summary "
                            "stats; nothing enters the session until you "
-                           "press Load, which is what makes it appear in "
-                           "the dataset dropdowns.")],
+                           "press Load, which adds it to the Explorer "
+                           "Dataset panel and ticks it.")],
                      style={"fontWeight": "700", "fontSize": F_BASE,
                             "display": "flex", "alignItems": "center"}),
             html.Div(style={"display": "flex", "gap": "10px",
@@ -76,8 +76,8 @@ def _finder_section() -> html.Div:
                          html.Button("Load into session",
                                      id="at-summary-load-btn", n_clicks=0,
                                      title="Add the previewed dataset to this "
-                                           "session's sources so it appears "
-                                           "in the dataset dropdowns.",
+                                           "session's working set - it is "
+                                           "ticked and charts straight away.",
                                      style={"fontSize": F_SMALL,
                                             "padding": "4px 10px"}),
                      ]),
