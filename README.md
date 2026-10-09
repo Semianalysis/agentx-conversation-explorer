@@ -2,8 +2,9 @@
 
 A standalone [Dash](https://dash.plotly.com/) app for exploring agentic-inference
 trace datasets from [InferenceX AgentX](https://inferencex.semianalysis.com/agentx/)
-— real Claude Code conversation traces, viewed through the lens of the serving
-compute they imply.
+— real Claude Code conversation traces, measured in the terms the traces
+actually record: context growth, tokens cached and recomputed, turn timing,
+and the dead air between turns.
 
 ## Quickstart
 
@@ -43,30 +44,34 @@ the conversation selection are shared everywhere; per-tab controls
 (measures, scales, filters, inspectors) are local views. Hover the ⓘ tags anywhere
 in the app for explanations of measures, columns, and controls.
 
-- **Summary** (last tab) — summary cards for the datasets this session has
-  loaded, plus a finder that searches published or locally imported datasets,
-  previews their stats, and loads one into the session.
-- **Explorer** — one context-growth curve per conversation (x: turn count /
-  cumulative time / busy time), a serving-assumption bar (architecture, GPU,
-  precisions, TP/PP/DP, MFU/MBU — all defaulting to documented values), and the
-  sortable/filterable conversation list that drives the cross-tab selection.
-- **Correlations** — three histograms with selectable measures (KV cache,
-  uncached input, decode output, turn FLOPs) over turn/time/value bins. Click
-  bars to build color-coded selections on one chart and see how much of every
-  bar on the other charts correlates, stacked by color, with per-selection
-  inspectors in the left panel.
+- **Explorer** (opens the app) — the Dataset panel described above, one
+  context-growth curve per conversation (x: turn count / cumulative time /
+  busy time), and the sortable/filterable conversation list that drives the
+  cross-tab selection.
+- **Correlations** — three histograms with selectable measures (KV cache
+  tokens, uncached input, decode output, idle before turn) over turn, time or
+  value bins. Click bars to build color-coded selections on one chart and see
+  how much of every bar on the other charts correlates, stacked by color, with
+  per-selection inspectors in the left panel.
+- **Deep-dive** — three scatter charts over a shared x measure (points, mean
+  across conversations, or per-chart histograms), a click magnifier (5×) with
+  cross-chart highlighting, a per-request point inspector, and **Export sweep
+  points (JSON)** for feeding a simulator.
 - **Pause Analytics** — what happens in the dead air between turns: pause
   durations stacked by cause (subagent work from the trace structure, tool
-  categories from an imported export, and an honest "unknown" remainder),
+  categories from an imported trace file, and an honest "unknown" remainder),
   alongside the ISL delivered when each pause ended, on one shared duration
   axis.
-- **Deep-dive** — implied FLOPs / memory / network aggregated over the selected
-  conversations, three scatter charts over a shared x measure, a click magnifier
-  (5×) with cross-chart highlighting, and a per-request point inspector.
+- **Summary** (last tab) — summary cards for the datasets this session has
+  loaded, plus the finder that searches published or locally imported datasets,
+  previews their stats, and loads one into the session.
 
-All compute/memory/network figures are **implied**: derived from the traces' token
-counts under the serving assumptions you pick — nothing is measured on hardware,
-and the app never fabricates missing values.
+Every number shown is a **trace fact** — tokens and seconds the dataset
+records — never a guess about hardware. The app models no FLOPs, bytes,
+memory movement or GPU counts, because the weights-per-token and data movement
+of proprietary models are not public; cost questions are answered by exporting
+sweep points and simulating outside this tool. Missing values are dropped, not
+fabricated.
 
 ## Data
 
