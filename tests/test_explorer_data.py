@@ -88,11 +88,18 @@ class TestConversationTable(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_conversation_table(self.pool, ["cA"], None)  # cB not in index
 
-    def test_no_main_turns_skipped_not_fabricated(self):
-        pool = [_rec("cC", role="subagent")]
-        rows, skipped = build_conversation_table(pool, ["cC"], None)
-        self.assertEqual(rows, [])
-        self.assertEqual(skipped, 1)
+    def test_subagent_only_conversation_is_listed_from_its_own_turns(self):
+        # OpenClaw subagent lanes have no main-agent request; they are
+        # summarized from the subagent's own turns (AgentX never hits this,
+        # since its subagents nest under a main agent) and still counted.
+        pool = [_rec("cC", role="subagent", turn_index=0, in_t=500, out=7),
+                _rec("cC", role="subagent", turn_index=1, in_t=900, out=9)]
+        rows, sub_only = build_conversation_table(pool, ["cC"], None)
+        self.assertEqual(sub_only, 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["n_turns"], 2)
+        self.assertEqual((rows[0]["isl0"], rows[0]["final_ctx"]), (500, 900))
+        self.assertEqual(rows[0]["max_out"], 9)
 
 
 class TestCurves(unittest.TestCase):

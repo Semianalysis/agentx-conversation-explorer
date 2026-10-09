@@ -120,6 +120,19 @@ The positional sum mode and bin_weighted are deleted. Internal panel bld 26:
 checkbox selection + one background 'Load selected' (thread + 1 Hz dcc.Interval
 progress bar + Done message; hf_client._BG state).
 
+OpenClaw imports (bld 37): modules/openclaw_import.py turns a colleague's
+OpenClaw trajectory export (steps.csv in a zip or dir) into the standard local
+cache — one conversation per agent LANE (session_id), one turn per model call,
+cached=cacheRead, uncached=cacheWrite+input, lane-relative startS/endS, and a
+subagent lane's turns nested under a subagent node. Tool calls/costs are NOT
+represented (we model turns, not tool execution). CLI:
+`python -m modules.openclaw_import <export.zip> [--slug NAME]`. Because such a
+lane can have NO main-agent turn (unlike AgentX, where subagents nest),
+build_conversation_table now summarizes subagent-only conversations from their
+own turns instead of dropping them; the second return value counts them.
+hf_client.local_hf_datasets() lists any cached detail.json carrying a "source"
+key, so every locally imported dataset (hf-- and openclaw--) shows up.
+
 Internal sources (bld 25): AGENTX_INTERNAL=1 reveals the Overview "Internal
 sources" panel (HF org listings via AGENTX_HF_SOURCES, private access via the
 user's HF_TOKEN — the security boundary is HF's ACL, never app code; no
