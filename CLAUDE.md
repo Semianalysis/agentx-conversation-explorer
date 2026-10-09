@@ -171,8 +171,10 @@ The Explorer Dataset panel shows the loaded datasets as a visible list (tick
 box + label + conversation count + x to unload), fed by four buttons: Browse
 published... (jumps to the Summary finder, so there is only ever one search
 UI), Local traces... (the old 'Load local export' - export is an action, not
-a thing a user has), Import session..., Export session. A newly loaded source
-is TICKED automatically, so loading always visibly does something. Every tab
+a thing a user has), Import session..., Export session. A load into an EMPTY
+working set ticks itself (so the first dataset charts rather than looking like
+nothing happened); a later load joins the list for the user to tick, never
+silently merging itself into the pool. Every tab
 reads at-explorer-filter-store {"slugs": [...]}; the other tabs show the
 working set read-only (at-{corr,pause}-dataset-echo) - there are no dataset
 dropdowns left. records.load_pool / merged_index / load_pool_activities

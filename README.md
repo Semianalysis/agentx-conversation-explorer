@@ -25,7 +25,8 @@ box and an **×** to unload it. Four buttons fill it:
   Importing names anything this machine no longer has rather than skipping it.
 
 The first dataset you load is ticked for you and charts immediately; later ones
-join the list. **Tick more than one and they are explored together** — the
+join the list for you to tick, so a load never silently changes what you are
+looking at. **Tick more than one and they are explored together** — the
 conversation list names each row's dataset, and conversation numbers stay
 per-dataset, so two datasets can never collide. Unloading with × drops a
 dataset from the session; the cached copy on disk is kept.

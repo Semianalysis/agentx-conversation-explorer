@@ -153,8 +153,10 @@ def register_explorer_callbacks(app) -> None:
                               src.make_source(detail["slug"], src.LOCAL,
                                               detail.get("label", ""),
                                               local_name))
+                more = " \u2014 tick it to add it to the charts" if current else ""
                 return out, (f"loaded {detail['slug']}: "
-                             f"{detail['conversation_count']} conversations")
+                             f"{detail['conversation_count']} conversations"
+                             + more)
 
             if trig == "at-explorer-load-session":
                 if not session_contents:
@@ -178,7 +180,8 @@ def register_explorer_callbacks(app) -> None:
                               src.make_source(detail["slug"],
                                               src.source_kind(detail),
                                               detail.get("label", "")))
-                return out, f"added {detail['slug']} to this session"
+                more = " \u2014 tick it to add it to the charts" if current else ""
+                return out, f"added {detail['slug']} to this session" + more
             raise PreventUpdate
         except PreventUpdate:
             raise
@@ -247,18 +250,20 @@ def register_explorer_callbacks(app) -> None:
         State("at-explorer-active-cl", "value"),
     )
     def render_loaded(session_sources, _cache, active):
-        """The visible working set. A newly loaded dataset is ticked
-        automatically (the first load should chart itself, not sit there
-        looking like nothing happened); unloading unticks it."""
+        """The visible working set: one row per loaded dataset, with its tick
+        box, conversation count and unload X.
+
+        Ticking is the user's, with ONE exception - when nothing is ticked, a
+        load ticks itself, so the first dataset charts instead of sitting
+        there looking like nothing happened. A later load joins the list for
+        the user to tick rather than silently merging itself into the pool.
+        Unloading drops the row and its tick together."""
         try:
             srcs = session_sources or []
             known = {s["slug"] for s in srcs}
             active = [a for a in (active or []) if a in known]
-            fresh = [s["slug"] for s in srcs if s["slug"] not in (active or [])]
-            if not active and fresh:
-                active = fresh[:1] if len(srcs) == 1 else active or fresh[:1]
-            elif fresh and len(srcs) > len(active):
-                active = list(active) + fresh          # newly added -> ticked
+            if not active and srcs:
+                active = [srcs[-1]["slug"]]   # most recently added
             if not srcs:
                 return html.Div("nothing loaded — browse the published "
                                 "datasets or pick a local trace file above",
