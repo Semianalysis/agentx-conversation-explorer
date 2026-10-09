@@ -49,6 +49,24 @@ locally. The bundled dataset registry starts with `cc-traces-weka-062126`
 (393 conversations, ~167k requests) and its 256k-context variant — both
 published under Apache-2.0 on HuggingFace.
 
+## Importing your own agent traces (OpenClaw exports)
+
+Besides the AgentX datasets, the explorer can load an **OpenClaw trajectory
+export** — the `steps.csv` / `tools.csv` / `runs.csv` bundle produced from
+harness traces:
+
+```bash
+python -m modules.openclaw_import path/to/export.zip      # or a directory
+```
+
+It writes the same local cache the AgentX importers use, so every tab works
+on it unchanged; pick it afterwards in the dataset dropdown. The mapping is
+one conversation per agent lane and one turn per model call, with
+`cacheRead` as cached tokens and `cacheWrite + input` as the uncached tokens
+prefill actually computes. Pauses keep their timing (so the
+"idle before turn" measure works), but tool calls, costs and compaction
+counts are not represented — this app models turns, not tool execution.
+
 ## Internal mode (optional)
 
 Operators who capture their own traces can point the explorer at additional

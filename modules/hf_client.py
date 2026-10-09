@@ -158,11 +158,15 @@ def consume_dirty() -> bool:
 
 
 def local_hf_datasets() -> list[dict]:
-    """Registry cards for locally imported HF datasets (detail.json scan)."""
+    """Registry cards for every LOCALLY IMPORTED dataset (HF raw imports and
+    OpenClaw exports alike): any cached detail.json carrying a 'source' key,
+    which the AgentX API's own payloads never have."""
     out = []
-    for p in sorted(DATA_DIR.glob("hf--*/detail.json")):
+    for p in sorted(DATA_DIR.glob("*/detail.json")):
         with open(p, encoding="utf-8") as f:
-            out.append(json.load(f))
+            d = json.load(f)
+        if d.get("source"):
+            out.append(d)
     return out
 
 
