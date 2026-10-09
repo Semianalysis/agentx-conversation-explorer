@@ -76,10 +76,49 @@ def layout() -> html.Div:
         controls.label("Dataset",
                        info_text="The dataset is SHARED state: every tab is a "
                                  "viewport onto the same data, and picking a "
-                                 "dataset on any tab switches all of them. "
-                                 "Datasets are imported and downloaded on the "
-                                 "Overview tab."),
-        controls.dropdown("at-explorer-dataset-dd", "pick a cached dataset"),
+                                 "dataset here switches all of them. The list "
+                                 "offers the PUBLISHED datasets by default; a "
+                                 "dataset imported from this machine appears "
+                                 "only once you load it below, so private "
+                                 "traces are never surfaced on their own. "
+                                 "Browse and preview more on the Summary tab."),
+        controls.dropdown("at-explorer-dataset-dd", "pick a dataset"),
+        html.Div(style={"display": "flex", "gap": "6px", "flexWrap": "wrap",
+                        "margin": "6px 0 2px", "alignItems": "center"},
+                 children=[
+                     dcc.Upload(
+                         id="at-explorer-load-local",
+                         accept=".zip", multiple=False,
+                         children=html.Button(
+                             "Load local export…",
+                             title="Pick an agent-trace export (.zip) from "
+                                   "this machine. It is flattened into the "
+                                   "gitignored local cache and added to this "
+                                   "session's sources - it never leaves the "
+                                   "machine.",
+                             style={"fontSize": "11px", "padding": "3px 8px"})),
+                     dcc.Upload(
+                         id="at-explorer-load-session",
+                         accept=".json", multiple=False,
+                         children=html.Button(
+                             "Import session…",
+                             title="Restore a source list exported earlier: "
+                                   "the datasets it names are re-activated "
+                                   "for this session. Sources whose cache is "
+                                   "missing on this machine are reported, not "
+                                   "silently skipped.",
+                             style={"fontSize": "11px", "padding": "3px 8px"})),
+                     html.Button("Export session",
+                                 id="at-explorer-export-session-btn", n_clicks=0,
+                                 title="Download this session's source list "
+                                       "(slugs, labels, and where local "
+                                       "exports came from - never trace data) "
+                                       "so tomorrow starts where today ended.",
+                                 style={"fontSize": "11px", "padding": "3px 8px"}),
+                 ]),
+        html.Div(id="at-explorer-sources-status",
+                 style={"fontSize": "11px", "color": "#666",
+                        "whiteSpace": "pre-wrap", "marginBottom": "4px"}),
         controls.label("Chart x measure",
                        info_text="X axis of the growth chart. turn count = "
                                  "main-agent turn ordinal (1..n). cumulative "

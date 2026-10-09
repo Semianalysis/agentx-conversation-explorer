@@ -12,9 +12,16 @@ pip install -r requirements.txt
 python app.py            # -> http://localhost:8050
 ```
 
-On first run, open the **Overview** tab, click **Import / refresh datasets**, then
-**Download traces** on a dataset card. Traces are cached under `data/` (gitignored);
-every other tab reads only that cache.
+The app opens on **Explorer**. Its Dataset panel lists the published datasets;
+pick one, then use **Download traces** on its card in the **Summary** tab if its
+traces are not cached yet. Traces are cached under `data/` (gitignored); every
+other tab reads only that cache.
+
+Local exports are never listed until you load them: use **Load local export…**
+in the Explorer Dataset panel (or the Summary finder). **Export session** writes
+a small JSON of the source list — slugs, labels and where local exports came
+from, never trace data — and **Import session…** restores it, naming anything
+this machine no longer has.
 
 ## Tabs
 
@@ -23,8 +30,9 @@ selection, and the serving assumptions are shared everywhere; per-tab controls
 (measures, scales, filters, inspectors) are local views. Hover the ⓘ tags anywhere
 in the app for explanations of measures, columns, and controls.
 
-- **Overview** — import datasets and see summary cards (token totals, model mix,
-  cached fraction).
+- **Summary** (last tab) — summary cards for the datasets this session has
+  loaded, plus a finder that searches published or locally imported datasets,
+  previews their stats, and loads one into the session.
 - **Explorer** — one context-growth curve per conversation (x: turn count /
   cumulative time / busy time), a serving-assumption bar (architecture, GPU,
   precisions, TP/PP/DP, MFU/MBU — all defaulting to documented values), and the
@@ -60,9 +68,8 @@ Besides the AgentX datasets, the explorer can load an **OpenClaw trajectory
 export** — the `steps.csv` / `tools.csv` / `runs.csv` bundle produced from
 harness traces:
 
-**From the app:** the Overview tab has an *Import traces from this machine*
-section — pick the export with the file dialog, or paste a full path (handy
-for large files or an unpacked folder).
+**From the app:** the Explorer tab's Dataset panel has **Load local export…** —
+pick the export with the file dialog and it joins this session's sources.
 
 **From the command line:**
 

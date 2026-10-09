@@ -11,6 +11,22 @@ Independent project — it imitates the InferenceX Explorer tab of
 
 ## Assignment (standing spec)
 
+- **Tabs and sources (user, 2026-10-09, bld 40).** EXPLORER opens the app;
+  Summary (the renamed Overview, modules/summary_*.py, ids at-summary-*) sits
+  LAST and reports only on datasets this session has LOADED. The dataset
+  dropdowns offer PUBLISHED datasets by default and a local import only once
+  the user brings it in - privacy by default, convenience on request. The
+  session's working set is a SOURCE LIST (modules/sources.py, at-sources-store,
+  owned by explorer_callbacks.manage_sources): entries are
+  {slug, kind: website|local, label, path}. The Explorer Dataset mini-panel
+  carries the controls at the TOP: "Load local export…" (file dialog ->
+  openclaw_import -> adds a local source), "Import session…" (restores an
+  exported source list, REPORTING any source this machine lacks rather than
+  dropping it), and "Export session" (downloads slugs/labels/paths only -
+  never trace data). Summary also has a finder: search online (AgentX
+  registry) or local (imported exports), preview a dataset's own stats, then
+  "Load into session".
+
 - **One state, many viewports (standing principle, restated by the user 2026-08-29).**
   Dataset, conversation selection, and serving assumptions are GLOBAL — switching
   tabs retains them. The dataset dropdowns on Explorer/Correlations are synced views

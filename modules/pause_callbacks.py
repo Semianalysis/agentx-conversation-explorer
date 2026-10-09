@@ -44,11 +44,12 @@ def register_pause_callbacks(app) -> None:
     @app.callback(
         Output("at-pause-dataset-dd", "options"),
         Input("at-tabs", "value"),
-        Input("at-overview-cache-store", "data"),
+        Input("at-summary-cache-store", "data"),
+        Input("at-sources-store", "data"),
     )
-    def dataset_options(_tab, _cache):
+    def dataset_options(_tab, _cache, session_sources):
         try:
-            return cached_dataset_options()
+            return cached_dataset_options(session_sources)
         except Exception:
             logger.exception("pause dataset options failed")
             raise PreventUpdate
