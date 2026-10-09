@@ -6,7 +6,11 @@ import logging
 from dash import ALL, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
-from modules import api_client, hf_client, records
+import base64
+import tempfile
+from pathlib import Path
+
+from modules import api_client, hf_client, openclaw_import, records
 from modules.controls import info
 from modules.explorer_data import apply_selection
 from modules.theme import F_SMALL, MONO, color_for, fmt_count
@@ -278,6 +282,58 @@ def register_overview_callbacks(app) -> None:
         except Exception:
             logger.exception("overview card render failed")
             raise PreventUpdate
+
+    @app.callback(
+        Output("at-overview-cache-store", "data", allow_duplicate=True),
+        Output("at-overview-local-status", "children"),
+        Input("at-overview-upload", "contents"),
+        Input("at-overview-import-path-btn", "n_clicks"),
+        State("at-overview-upload", "filename"),
+        State("at-overview-import-path", "value"),
+        State("at-overview-cache-store", "data"),
+        prevent_initial_call=True,
+    )
+    def import_local(contents, _n, filename, path_value, cache_counts):
+        """Import a trace export chosen with the file dialog (uploaded into
+        a temp file) or named by a path on this machine. Everything stays in
+        the local, gitignored cache."""
+        trig = callback_context.triggered_id
+        tmp = None
+        try:
+            if trig == "at-overview-upload":
+                if not contents:
+                    raise PreventUpdate
+                header, _, b64 = contents.partition(",")
+                tmp = Path(tempfile.gettempdir()) / (filename or "export.zip")
+                tmp.write_bytes(base64.b64decode(b64))
+                source, label = tmp, (filename or tmp.name)
+            else:
+                if not path_value or not str(path_value).strip():
+                    return no_update, "type a path, or use the file dialog"
+                source = Path(str(path_value).strip().strip('"'))
+                if not source.exists():
+                    return no_update, f"no such file or folder: {source}"
+                label = source.name
+            detail = openclaw_import.import_openclaw(source)
+            records.clear_pools()
+            cache_counts = dict(cache_counts or {})
+            cache_counts[detail["slug"]] = detail["conversation_count"]
+            s = detail["summary"]
+            msg = (f"imported {label}: {detail['conversation_count']} "
+                   f"conversations, "
+                   f"{s['mainTurns'] + s['subagentTurns']:,} model calls"
+                   + (f", {detail['skipped_rows']} rows skipped"
+                      if detail.get("skipped_rows") else "")
+                   + " - pick it in the dataset dropdown")
+            return cache_counts, msg
+        except PreventUpdate:
+            raise
+        except Exception as e:
+            logger.exception("local import failed")
+            return no_update, f"import FAILED: {e}"
+        finally:
+            if tmp is not None and tmp.exists():
+                tmp.unlink(missing_ok=True)
 
     if not hf_client.internal_mode():
         return  # internal-source callbacks reference components that only

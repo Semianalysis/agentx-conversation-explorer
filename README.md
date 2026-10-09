@@ -55,11 +55,19 @@ Besides the AgentX datasets, the explorer can load an **OpenClaw trajectory
 export** — the `steps.csv` / `tools.csv` / `runs.csv` bundle produced from
 harness traces:
 
+**From the app:** the Overview tab has an *Import traces from this machine*
+section — pick the export with the file dialog, or paste a full path (handy
+for large files or an unpacked folder).
+
+**From the command line:**
+
 ```bash
 python -m modules.openclaw_import path/to/export.zip      # or a directory
 ```
 
-It writes the same local cache the AgentX importers use, so every tab works
+Imports stay on your machine: they are written to the local `data/` cache,
+which is gitignored, so a private dataset cannot be committed or published by
+accident. It writes the same local cache the AgentX importers use, so every tab works
 on it unchanged; pick it afterwards in the dataset dropdown. The mapping is
 one conversation per agent lane and one turn per model call, with
 `cacheRead` as cached tokens and `cacheWrite + input` as the uncached tokens
