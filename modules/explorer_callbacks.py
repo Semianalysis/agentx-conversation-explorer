@@ -47,6 +47,17 @@ def _available_slugs() -> set[str]:
 # dataset when the preferred one isn't on disk.
 
 
+def _ticks_after_load(ticked: list[str] | None, slug: str) -> list[str]:
+    """The working set after loading `slug`: unchanged when something is
+    already ticked (a load must not silently change what is charted), else
+    just the new dataset, so the first load charts itself."""
+    return list(ticked) if ticked else [slug]
+
+
+def _tick_hint(ticked: list[str] | None) -> str:
+    return " \u2014 tick it to add it to the charts" if ticked else ""
+
+
 def _annotate_sort_columns(sort_by: list[dict]) -> list[dict]:
     """Column defs with a broad arrow + priority numeral appended to sorted
     columns' names ('final ctx ▼2'). Numeral only when several columns sort."""
@@ -120,6 +131,7 @@ def register_explorer_callbacks(app) -> None:
     @app.callback(
         Output("at-sources-store", "data"),
         Output("at-explorer-sources-status", "children"),
+        Output("at-explorer-active-cl", "value", allow_duplicate=True),
         Input("at-explorer-load-local", "contents"),
         Input("at-explorer-load-session", "contents"),
         Input("at-summary-load-btn", "n_clicks"),
@@ -127,10 +139,11 @@ def register_explorer_callbacks(app) -> None:
         State("at-explorer-load-session", "filename"),
         State("at-summary-found-store", "data"),
         State("at-sources-store", "data"),
+        State("at-explorer-active-cl", "value"),
         prevent_initial_call=True,
     )
     def manage_sources(local_contents, session_contents, _load_clicks,
-                       local_name, session_name, found, current):
+                       local_name, session_name, found, current, ticked):
         """THE owner of the session source list: a trace file picked in the
         Dataset panel, a session file restored there, or a dataset the Summary
         finder loaded all converge here. Whatever arrives is appended to the
@@ -152,10 +165,10 @@ def register_explorer_callbacks(app) -> None:
                               src.make_source(detail["slug"], src.LOCAL,
                                               detail.get("label", ""),
                                               local_name))
-                more = " \u2014 tick it to add it to the charts" if current else ""
+                ticks = _ticks_after_load(ticked, detail["slug"])
                 return out, (f"loaded {detail['slug']}: "
                              f"{detail['conversation_count']} conversations"
-                             + more)
+                             + _tick_hint(ticked)), ticks
 
             if trig == "at-explorer-load-session":
                 if not session_contents:
@@ -169,7 +182,7 @@ def register_explorer_callbacks(app) -> None:
                     msg += ("\nnot on this machine: "
                             + ", ".join(m["slug"] for m in missing)
                             + " — load the trace file(s) again to re-add")
-                return present, msg
+                return present, msg, no_update
 
             if trig == "at-summary-load-btn":
                 detail = (found or {}).get("detail")
@@ -179,14 +192,15 @@ def register_explorer_callbacks(app) -> None:
                               src.make_source(detail["slug"],
                                               src.source_kind(detail),
                                               detail.get("label", "")))
-                more = " \u2014 tick it to add it to the charts" if current else ""
-                return out, f"added {detail['slug']} to this session" + more
+                ticks = _ticks_after_load(ticked, detail["slug"])
+                return (out, f"added {detail['slug']} to this session"
+                        + _tick_hint(ticked), ticks)
             raise PreventUpdate
         except PreventUpdate:
             raise
         except Exception as e:
             logger.exception("source management failed")
-            return no_update, f"FAILED: {e}"
+            return no_update, f"FAILED: {e}", no_update
 
     @app.callback(
         Output("at-sources-store", "data", allow_duplicate=True),
@@ -252,17 +266,15 @@ def register_explorer_callbacks(app) -> None:
         """The visible working set: one row per loaded dataset, with its tick
         box, conversation count and unload X.
 
-        Ticking is the user's, with ONE exception - when nothing is ticked, a
-        load ticks itself, so the first dataset charts instead of sitting
-        there looking like nothing happened. A later load joins the list for
-        the user to tick rather than silently merging itself into the pool.
-        Unloading drops the row and its tick together."""
+        Ticking belongs to the user; manage_sources ticks a load into an empty
+        working set, because only it knows which dataset that was (sources.add
+        re-sorts the list). Here we only render and PRUNE - a tick whose
+        dataset was unloaded goes with it. Nothing is ever ticked by guess, so
+        a cache refresh cannot silently change what is charted."""
         try:
             srcs = session_sources or []
             known = {s["slug"] for s in srcs}
             active = [a for a in (active or []) if a in known]
-            if not active and srcs:
-                active = [srcs[-1]["slug"]]   # most recently added
             if not srcs:
                 return html.Div("nothing loaded — browse the published "
                                 "datasets or pick a local trace file above",
@@ -272,6 +284,12 @@ def register_explorer_callbacks(app) -> None:
             for s_ in srcs:
                 n = len(api_client.cached_conversation_ids(s_["slug"]))
                 tag = "" if s_["kind"] == "website" else "  [local]"
+                count = (f"{n:,}" if n else "no traces")
+                count_style = {"fontSize": "11px",
+                               "color": "#888" if n else "#b36b00"}
+                count_title = ("cached conversations" if n else
+                               "no traces cached yet - open Summary and use "
+                               "'Download traces' on this dataset's card")
                 rows.append(html.Div(
                     style={"display": "flex", "alignItems": "center",
                            "gap": "6px", "padding": "1px 0"},
@@ -289,8 +307,8 @@ def register_explorer_callbacks(app) -> None:
                                          "overflow": "hidden",
                                          "textOverflow": "ellipsis",
                                          "whiteSpace": "nowrap"}),
-                        html.Span(f"{n:,}", style={"fontSize": "11px",
-                                                   "color": "#888"}),
+                        html.Span(count, style=count_style,
+                                  title=count_title),
                         html.Button("×", id={"type": "at-explorer-unload",
                                              "slug": s_["slug"]}, n_clicks=0,
                                     title="Unload from this session (the "
@@ -315,12 +333,29 @@ def register_explorer_callbacks(app) -> None:
 
     @app.callback(
         Output("at-explorer-filter-store", "data"),
+        Output("at-explorer-pending-status", "children"),
         Input("at-explorer-active-cl", "value"),
+        Input("at-summary-cache-store", "data"),
         prevent_initial_call=True,
     )
-    def coalesce_filters(active):
-        """The ticked datasets ARE the working set, shared by every tab."""
-        return {"slugs": list(active or [])}
+    def coalesce_filters(active, _cache_counts):
+        """The ticked datasets ARE the working set, shared by every tab.
+
+        A dataset can be ticked before its traces are cached, so the set is
+        split: 'slugs' are the ones that can actually be read, 'pending' the
+        ones still needing a download. Consumers read 'slugs' and therefore
+        never hit a missing cache; the user is TOLD about the rest instead of
+        staring at a blank tab. 'cached' makes this store change when a
+        download finishes, which is what re-renders every tab."""
+        ticked = list(active or [])
+        counts = {s: len(api_client.cached_conversation_ids(s))
+                  for s in ticked}
+        ready = [s for s in ticked if counts[s]]
+        pending = [s for s in ticked if not counts[s]]
+        note = ("" if not pending else
+                "no traces cached for " + ", ".join(pending)
+                + " \u2014 open Summary and use 'Download traces' on its card")
+        return {"slugs": ready, "pending": pending, "cached": counts}, note
 
     @app.callback(
         Output("at-explorer-conv-table", "data"),
@@ -399,9 +434,15 @@ def register_explorer_callbacks(app) -> None:
             if trig == "at-explorer-clear-btn":
                 new_ids: set[str] = set()
             elif trig == "at-explorer-filter-store":
-                # keep only selections whose dataset is still loaded
-                live = {r["id"] for r in table_rows}
-                new_ids = current_ids & live
+                # Keep only selections whose dataset is still in the working
+                # set. Conversation ids are namespaced, so this is decidable
+                # here; the table passed as State is the PREVIOUS one and
+                # would keep ids from datasets that just went away.
+                live = set(slugs)
+                new_ids = {cid for cid in current_ids
+                           if records.split_conv_id(cid)[0] in live}
+                if new_ids == current_ids:
+                    raise PreventUpdate
             elif trig == "at-explorer-growth-graph":
                 if not click or not click.get("points"):
                     raise PreventUpdate

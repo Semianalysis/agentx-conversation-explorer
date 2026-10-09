@@ -15,7 +15,8 @@ from modules import controls, records, theme
 from modules.arch import ARCHITECTURES, resolve_assumptions
 from modules.deepdive_data import (aggregate_selection, grouped_series,
                                    sweep_points, zoom_member_uids)
-from modules.explorer_data import build_conversation_table
+from modules.explorer_data import (build_conversation_table,
+                                   live_selection)
 from modules.figures import empty_figure
 from modules.measures import (ALL_MEASURES, X_MEASURES, axis_units,
                               measure_series, shared_axis_range, zoom_window)
@@ -147,7 +148,7 @@ def register_deepdive_callbacks(app) -> None:
             index_ids = records.merged_index(slugs)
             rows, _ = build_conversation_table(pool, index_ids, None)
             ordinal = {r["id"]: r["ordinal"] for r in rows}
-            sel_ids = list((selection or {}).get("conv_ids") or [])
+            sel_ids = live_selection(selection, ordinal)
             all_selected = not sel_ids
             conv_ids = sel_ids or list(ordinal)
 
@@ -255,9 +256,7 @@ def register_deepdive_callbacks(app) -> None:
             pool = records.load_pool(slugs)
             index_ids = records.merged_index(slugs)
             ordinal = {cid: i + 1 for i, cid in enumerate(index_ids)}
-            live = set(slugs)
-            sel_ids = [cid for cid in ((selection or {}).get("conv_ids") or [])
-                       if records.split_conv_id(cid)[0] in live]
+            sel_ids = live_selection(selection, ordinal)
             agg = aggregate_selection(pool, sel_ids or index_ids,
                                       ARCHITECTURES[arch_key], cfg, ordinal)
             sweep = sweep_points(agg["per_request"], axes["x"])

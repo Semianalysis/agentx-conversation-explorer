@@ -30,6 +30,7 @@ from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES, MEASURES,
                                        measure_values, member_mask,
                                        selection_color, set_live)
 from modules.deepdive_data import aggregate_selection
+from modules.explorer_data import live_selection
 from modules.figures import (empty_figure, multi_histogram_figure,
                              selection_to_bins)
 from modules.theme import MONO, fmt_count
@@ -56,7 +57,8 @@ def _enriched_rows(slugs: list[str], conv_selection: dict | None,
     if key in _ENRICH_CACHE:
         return _ENRICH_CACHE[key]
     ordinal = {cid: i + 1 for i, cid in enumerate(records.merged_index(slugs))}
-    conv_ids = list(sel_ids) or records.conversation_ids(pool)
+    in_pool = records.conversation_ids(pool)
+    conv_ids = live_selection({"conv_ids": list(sel_ids)}, in_pool) or in_pool
     rows = aggregate_selection(pool, conv_ids, ARCHITECTURES[arch_key], cfg,
                                ordinal)["per_request"]
     _ENRICH_CACHE.clear()  # keep exactly the latest working set

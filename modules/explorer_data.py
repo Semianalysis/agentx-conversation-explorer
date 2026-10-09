@@ -214,3 +214,18 @@ def apply_selection(records: list[dict], selection: dict | None,
         return records, {}
     out = [r for r in records if r["conv_id"] in ids]
     return out, {"n_sel_convs": len(ids), "n_after_selection": len(out)}
+
+
+def live_selection(selection: dict | None, pool_ids) -> list[str]:
+    """The selected conversation ids that this pool actually holds.
+
+    [] means "no usable selection" and every consumer reads that as ALL
+    conversations - the same rule as explorer_data.apply_selection. A stale id
+    (dataset unticked, or its traces not cached yet) is dropped rather than
+    raising inside a chart callback or emptying the tab.
+    """
+    ids = (selection or {}).get("conv_ids") or []
+    if not ids:
+        return []
+    live = [cid for cid in ids if cid in set(pool_ids)]
+    return live

@@ -167,6 +167,16 @@ hf_client.local_hf_datasets() lists any cached detail.json carrying a "source"
 key, so every locally imported dataset (hf-- and openclaw--) shows up.
 
 Working set (bld 41): the dataset is no longer ONE slug - it is a LIST.
+at-explorer-filter-store carries {"slugs": ready, "pending": uncached,
+"cached": {slug: n}}: a dataset can be ticked BEFORE its traces are cached, so
+only READY slugs reach load_pool and the pending ones are named in the panel
+instead of blanking every tab; the cache counts make the store change when a
+download finishes, which is what re-renders the tabs. manage_sources owns the
+auto-tick (sources.add re-SORTS, so no later callback can tell which dataset
+was just loaded); render_loaded only renders and prunes. explorer_data.
+live_selection narrows a selection to the pool - a stale id is dropped, never
+raised on, and an all-stale selection reads as ALL (same rule as
+apply_selection).
 The Explorer Dataset panel shows the loaded datasets as a visible list (tick
 box + label + conversation count + x to unload), fed by four buttons: Browse
 published... (jumps to the Summary finder, so there is only ever one search
