@@ -8,6 +8,7 @@ from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES,
                                        MAX_SELECTIONS, MEASURES,
                                        assign_bin, bin_runs,
                                        clear_selection, initial_store,
+                                       InertChart, PaletteExhausted,
                                        next_color_index, pick_bin,
                                        pick_range,
                                        measure_values, member_mask,
@@ -59,10 +60,15 @@ class TestSelectionStore(unittest.TestCase):
         self.assertEqual(s["chart"], "y2")
         self.assertEqual(s["selections"][0]["bins"], [5])
 
-    def test_click_on_another_chart_raises(self):
+    def test_click_on_another_chart_raises_inert_not_the_cap(self):
         s = pick_bin(initial_store(), "y1", 5)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(InertChart):
             pick_bin(s, "y3", 1)
+        with self.assertRaises(InertChart):
+            pick_range(s, "y2", 1, 3)
+        # both stay ValueErrors, so the outer callback handler still sees them
+        self.assertTrue(issubclass(InertChart, ValueError))
+        self.assertTrue(issubclass(PaletteExhausted, ValueError))
 
     def test_each_click_takes_the_next_color(self):
         s = initial_store()
@@ -80,8 +86,12 @@ class TestSelectionStore(unittest.TestCase):
         self.assertEqual([x["color"] for x in s["selections"]],
                          list(range(MAX_SELECTIONS)))
         self.assertIsNone(next_color_index(s))      # all seven in use
-        with self.assertRaises(ValueError):
+        # the cap must be SAYABLE: a distinct type, so the click handler
+        # cannot swallow it the way it silences an inert chart
+        with self.assertRaises(PaletteExhausted) as ctx:
             pick_bin(s, "y1", 99)
+        self.assertIn("clear one", str(ctx.exception))
+        self.assertNotIsInstance(ctx.exception, InertChart)
 
     def test_releasing_a_bin_frees_its_color_for_reuse(self):
         s = initial_store()

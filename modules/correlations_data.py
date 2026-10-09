@@ -35,6 +35,16 @@ from modules.theme import BRAND_PALETTE
 # One selection per brand color: every live selection is a
 # DIFFERENT color, which is the whole point of the cycle.
 MAX_SELECTIONS = len(BRAND_PALETTE)
+
+class InertChart(ValueError):
+    """A pick aimed at a chart that is not the selection chart. The caller
+    stays silent: the default cursor over that chart already says it."""
+
+
+class PaletteExhausted(ValueError):
+    """Every brand color is in use. The caller must SAY so - a click that
+    silently does nothing reads as a broken chart."""
+
 CHART_SLOTS = ("y1", "y2", "y3")
 
 # --- Measure registry (per-chart X measures; y is always request count) ----
@@ -123,8 +133,9 @@ def _take_color(store: dict) -> int:
     an eighth."""
     c = next_color_index(store)
     if c is None:
-        raise ValueError(f"all {len(BRAND_PALETTE)} selection colors are in "
-                         f"use - clear one first")
+        raise PaletteExhausted(
+            f"all {len(BRAND_PALETTE)} selection colors are in use — clear "
+            f"one before starting another")
     store["next_color"] = (c + 1) % len(BRAND_PALETTE)
     return c
 
@@ -168,7 +179,7 @@ def _anchor(store: dict, chart: str) -> None:
     if store["chart"] is None:
         store["chart"] = chart
     if store["chart"] != chart:
-        raise ValueError(
+        raise InertChart(
             f"selections live in chart {store['chart']} — this click "
             f"targeted {chart}")
 

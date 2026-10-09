@@ -25,6 +25,7 @@ from modules.arch import ARCHITECTURES, resolve_assumptions
 from modules.binning import bin_counts, edge_label, filter_records, make_bins
 from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES,
                                        MAX_SELECTIONS, MEASURES,
+                                       InertChart,
                                        assign_bin, bin_runs,
                                        clear_selection, initial_store,
                                        next_color_index, pick_bin,
@@ -168,9 +169,10 @@ def register_correlations_callbacks(app) -> None:
                         if not bins:
                             raise PreventUpdate
                         new = pick_range(store, slot, bins[0], bins[-1])
-                except ValueError:
-                    # click on a non-selection chart: the default cursor
-                    # already says this chart is inert — stay silent
+                except InertChart:
+                    # the default cursor over that chart already says it is
+                    # inert — stay silent. A PaletteExhausted deliberately
+                    # does NOT land here: it has to reach the hint line.
                     raise PreventUpdate
                 return new, "", *reset
 
