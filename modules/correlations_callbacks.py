@@ -9,7 +9,7 @@ serving assumptions, or the Explorer conversation selection RESETS the store
 — bin indices are positions in the current binning, and keeping them across
 a re-bin would silently condition on different value ranges.
 
-One RENDER callback draws the three charts, the armed-cursor classes on
+One RENDER callback draws the three charts, the pick-cursor classes on
 their wrappers, and the inspector sections from (filters, axes, selections)
 — the inspectors and the charts can never disagree.
 """
@@ -23,12 +23,14 @@ from dash.exceptions import PreventUpdate
 from modules import records
 from modules.arch import ARCHITECTURES, resolve_assumptions
 from modules.binning import bin_counts, edge_label, filter_records, make_bins
-from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES, MEASURES,
-                                       add_selection,
-                                       assign_bin, assign_bin_range, bin_runs,
+from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES,
+                                       MAX_SELECTIONS, MEASURES,
+                                       assign_bin, bin_runs,
                                        clear_selection, initial_store,
+                                       next_color_index, pick_bin,
+                                       pick_range,
                                        measure_values, member_mask,
-                                       selection_color, set_live)
+                                       selection_color)
 from modules.deepdive_data import aggregate_selection
 from modules.explorer_data import live_selection
 from modules.figures import (empty_figure, multi_histogram_figure,
@@ -122,9 +124,7 @@ def register_correlations_callbacks(app) -> None:
         [Output(f"at-corr-graph-{slot}", "clickData") for slot in CHART_SLOTS],
         [Input(f"at-corr-graph-{slot}", "clickData") for slot in CHART_SLOTS],
         [Input(f"at-corr-graph-{slot}", "selectedData") for slot in CHART_SLOTS],
-        Input("at-corr-newsel-btn", "n_clicks"),
         Input({"type": "at-corr-insp-bin", "sid": ALL, "bin": ALL}, "n_clicks"),
-        Input({"type": "at-corr-insp-live", "sid": ALL}, "n_clicks"),
         Input({"type": "at-corr-insp-clear", "sid": ALL}, "n_clicks"),
         Input("at-corr-filter-store", "data"),
         Input("at-corr-axes-store", "data"),
@@ -148,11 +148,6 @@ def register_correlations_callbacks(app) -> None:
                         "at-explorer-config-store"):
                 # re-bin -> old bin indices would mean different value ranges
                 return initial_store(), "", *reset
-            if trig == "at-corr-newsel-btn":
-                if not tval:
-                    raise PreventUpdate
-                return add_selection(store), "", *reset
-
             if isinstance(trig, str) and trig.startswith("at-corr-graph-"):
                 if not tval:  # clickData reset echo / cleared select box
                     raise PreventUpdate
@@ -163,8 +158,8 @@ def register_correlations_callbacks(app) -> None:
                         pts = tval.get("points") or []
                         if not pts:
                             raise PreventUpdate
-                        new = assign_bin(store, store["live"], slot,
-                                         int(round(pts[0]["x"])))
+                        new = pick_bin(store, slot,
+                                       int(round(pts[0]["x"])))
                     else:  # selectedData box
                         rng = tval.get("range")
                         if not rng or "x" not in rng:
@@ -172,8 +167,7 @@ def register_correlations_callbacks(app) -> None:
                         bins = selection_to_bins(tuple(rng["x"]), _N_BINS)
                         if not bins:
                             raise PreventUpdate
-                        new = assign_bin_range(store, store["live"], slot,
-                                               bins[0], bins[-1])
+                        new = pick_range(store, slot, bins[0], bins[-1])
                 except ValueError:
                     # click on a non-selection chart: the default cursor
                     # already says this chart is inert — stay silent
@@ -187,11 +181,9 @@ def register_correlations_callbacks(app) -> None:
                 if trig["type"] == "at-corr-insp-bin":
                     if store["chart"] is None:
                         raise PreventUpdate
-                    # editing a strip also arms that inspector
-                    new = set_live(assign_bin(store, sid, store["chart"],
-                                              trig["bin"]), sid)
-                elif trig["type"] == "at-corr-insp-live":
-                    new = set_live(store, sid)
+                    # the strip edits ONE selection explicitly, so it keeps
+                    # the transfer semantics a bare chart click no longer has
+                    new = assign_bin(store, sid, store["chart"], trig["bin"])
                 elif trig["type"] == "at-corr-insp-clear":
                     new = clear_selection(store, sid)
                 else:
@@ -292,7 +284,7 @@ def register_correlations_callbacks(app) -> None:
                                        s["bins"], log_x)
                     members = [j for j, m in enumerate(mask) if m]
                 sel_rows.append({"sel": s, "name": f"S{i + 1}",
-                                 "color": selection_color(s["sid"]),
+                                 "color": selection_color(s),
                                  "members": members,
                                  "member_seqs": ([filtered[j]["seq"] for j in members]
                                                  if members else [])})
@@ -320,10 +312,12 @@ def register_correlations_callbacks(app) -> None:
                     own_marks=own, overlays=overlays,
                     stat_values=defined[c]))
 
-            # armed cursor: on the selection chart, or everywhere while
-            # nothing is anchored yet
-            armed_cls = f"corr-cursor-{store['live'] % 10}"
-            classes = [armed_cls if (sel_chart is None or c == sel_chart)
+            # The cursor wears the color the NEXT click will take, over the
+            # selection chart (over every chart while nothing is selected and
+            # any of them could become it).
+            nxt = next_color_index(store)
+            cursor_cls = "" if nxt is None else f"corr-cursor-{nxt}"
+            classes = [cursor_cls if (sel_chart is None or c == sel_chart)
                        else "" for c in CHART_SLOTS]
 
             inspectors = [
@@ -331,10 +325,19 @@ def register_correlations_callbacks(app) -> None:
                                    len(filtered))
                 for r in sel_rows
             ]
-            status = (f"selections are in "
-                      f"{MEASURES[axes[sel_chart]]['label']}"
-                      if sel_chart
-                      else "you may choose to begin a selection in any chart")
+            if not sel_chart:
+                status = ("click any bar to start a selection — it takes the "
+                          "next color, and the other two charts show where "
+                          "those requests land")
+            elif nxt is None:
+                status = (f"selections are in "
+                          f"{MEASURES[axes[sel_chart]]['label']} — all "
+                          f"{MAX_SELECTIONS} colors in use, clear one to add "
+                          f"another")
+            else:
+                status = (f"selections are in "
+                          f"{MEASURES[axes[sel_chart]]['label']} — the next "
+                          f"click takes the cursor's color")
             gate_txt = "rows through gates:\n" + " → ".join(
                 f"{k}={v:,}" for k, v in gates.items())
             return *figs, *classes, inspectors, status, gate_txt
@@ -352,39 +355,28 @@ def _rgba(hex_color: str, alpha: float) -> str:
 
 def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
                        heights: dict, y_vals: dict, n_pool: int) -> html.Div:
-    """One left-panel section per selection: an arming header with the
-    colored cursor-arrow (click to pick with this color), a color-coded
-    Clear button, a clickable per-bin strip of the shared selection chart
-    (own bins in this color, bins owned by OTHER inspectors in their owner's
-    faded color), and per-bin / aggregate detail. Sections never disappear —
-    an unused selection is just empty."""
+    """One left-panel section per selection: a colored header naming it, a
+    color-coded Clear, a clickable per-bin strip of the shared selection
+    chart (own bins in this color, bins owned by OTHER selections in their
+    owner's faded color), and per-bin / aggregate detail. A selection exists
+    because you clicked a bar, and disappears when its last bin goes."""
     s, color, name = row["sel"], row["color"], row["name"]
-    armed = s["sid"] == store["live"]
     sel_chart = store["chart"]
 
     n_bins_owned = len(s["bins"])
     header = html.Div(
-        [html.Span("➤", style={"color": color, "fontSize": "15px",
-                               "flex": "0 0 auto",
-                               "opacity": 1.0 if armed else 0.35}),
-         html.Span(f"{name} — {n_bins_owned} bins" if n_bins_owned
-                   else f"{name} — empty"),
-         *( [html.Span("picking", style={"fontSize": "10px", "color": "white",
-                                         "background": color,
-                                         "borderRadius": "3px",
-                                         "padding": "0 4px"})] if armed else [] )],
-        id={"type": "at-corr-insp-live", "sid": s["sid"]}, n_clicks=0,
-        title="Click to arm this inspector: the mouse cursor takes its color "
-              "over the selection chart (over every chart while nothing is "
-              "selected yet) and your bin picks land here. Picking a bin "
-              "another inspector owns transfers it; picking one this "
-              "inspector owns releases it.",
+        [html.Span("\u25c6", style={"color": color, "fontSize": "13px",
+                                    "flex": "0 0 auto"}),
+         html.Span(f"{name} \u2014 {n_bins_owned} "
+                   f"bin{'s' if n_bins_owned != 1 else ''}")],
+        title="A selection in this color. Its bins are highlighted on the "
+              "selection chart, and the other two charts stack this color "
+              "where the same requests land - that stack is the correlation.",
         style={"display": "flex", "alignItems": "center", "gap": "6px",
-               "cursor": "pointer", "flex": "1 1 auto", "fontSize": "12px",
-               "fontWeight": "700" if armed else "400", "minWidth": "0"})
+               "flex": "1 1 auto", "fontSize": "12px", "minWidth": "0"})
     clear_btn = html.Button(
         "Clear", id={"type": "at-corr-insp-clear", "sid": s["sid"]}, n_clicks=0,
-        title="Empty this selection. The section stays for reuse.",
+        title="Drop this selection and return its color to the cycle.",
         style={"fontSize": "11px", "padding": "0 8px", "lineHeight": "18px",
                "flex": "0 0 auto", "borderRadius": "3px",
                "border": f"1px solid {color}", "background": "white",
@@ -399,7 +391,7 @@ def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
         owner_by_bin = {}
         for other in store["selections"]:
             for b in other["bins"]:
-                owner_by_bin[b] = other["sid"]
+                owner_by_bin[b] = other     # the selection, which carries its color
         own = set(s["bins"])
         strip_bins = []
         for b in range(len(h)):
@@ -457,13 +449,7 @@ def _inspector_section(row: dict, store: dict, axes: dict, edges: dict,
                 kids.append(html.Div(
                     f"Σ {MEASURES[axes[c]]['label']}: {fmt_count(total)}",
                     style=mono11))
-    else:
-        kids.append(html.Div(
-            "empty — click bins on any chart (the first pick chooses the "
-            "selection chart)",
-            style={"fontSize": "11px", "color": "#999", "marginTop": "4px"}))
-
     return html.Div(kids, style={
-        "border": f"1px solid {'#888' if armed else '#ddd'}",
+        "border": "1px solid #ddd",
         "borderLeft": f"4px solid {color}", "borderRadius": "4px",
         "padding": "6px 8px", "marginTop": "8px", "background": "white"})

@@ -3,12 +3,15 @@ store, and membership matching."""
 import unittest
 
 from modules.binning import bin_index, make_bins
+from modules.theme import BRAND_PALETTE
 from modules.correlations_data import (CHART_SLOTS, DEFAULT_AXES,
-                                       MAX_SELECTIONS, MEASURES, add_selection,
-                                       assign_bin, assign_bin_range, bin_runs,
+                                       MAX_SELECTIONS, MEASURES,
+                                       assign_bin, bin_runs,
                                        clear_selection, initial_store,
+                                       next_color_index, pick_bin,
+                                       pick_range,
                                        measure_values, member_mask,
-                                       selection_color, set_live)
+                                       selection_color)
 from modules.figures import selection_to_bins
 
 
@@ -42,92 +45,125 @@ class TestMeasureRegistry(unittest.TestCase):
 
 
 class TestSelectionStore(unittest.TestCase):
-    def test_initial_shape(self):
+    """A click IS the gesture: it takes the next brand color, or releases a
+    bin it already owns."""
+
+    def test_initial_shape_is_nothing_selected(self):
         s = initial_store()
-        self.assertEqual(len(s["selections"]), 1)  # one section always present
-        self.assertEqual(s["live"], s["selections"][0]["sid"])
+        self.assertEqual(s["selections"], [])
+        self.assertIsNone(s["live"])
         self.assertIsNone(s["chart"])
 
-    def test_first_pick_anchors_the_shared_chart(self):
-        s = assign_bin(initial_store(), 0, "y2", 5)
+    def test_first_click_anchors_the_shared_chart(self):
+        s = pick_bin(initial_store(), "y2", 5)
         self.assertEqual(s["chart"], "y2")
         self.assertEqual(s["selections"][0]["bins"], [5])
 
-    def test_click_on_other_chart_raises(self):
-        s = assign_bin(initial_store(), 0, "y1", 5)
+    def test_click_on_another_chart_raises(self):
+        s = pick_bin(initial_store(), "y1", 5)
         with self.assertRaises(ValueError):
-            assign_bin(s, 0, "y3", 1)
+            pick_bin(s, "y3", 1)
 
-    def test_bins_are_exclusive_between_inspectors(self):
-        s = assign_bin(initial_store(), 0, "y1", 5)
-        s = add_selection(s)                    # S2 armed
-        s = assign_bin(s, 1, "y1", 5)           # steals bin 5 from S1
-        self.assertEqual(s["selections"][0]["bins"], [])
-        self.assertEqual(s["selections"][1]["bins"], [5])
+    def test_each_click_takes_the_next_color(self):
+        s = initial_store()
+        for i, b in enumerate((1, 2, 3)):
+            s = pick_bin(s, "y1", b)
+            self.assertEqual(s["selections"][i]["color"], i)
+        colors = [selection_color(x) for x in s["selections"]]
+        self.assertEqual(len(set(colors)), 3)       # all different
+        self.assertEqual(colors[0], BRAND_PALETTE[0])
 
-    def test_reclick_own_bin_releases_it(self):
-        s = assign_bin(initial_store(), 0, "y1", 5)
-        s = assign_bin(s, 0, "y1", 5)
-        self.assertEqual(s["selections"][0]["bins"], [])
-        self.assertIsNone(s["chart"])           # all empty -> unanchored
+    def test_colors_cycle_through_the_seven(self):
+        s = initial_store()
+        for b in range(MAX_SELECTIONS):
+            s = pick_bin(s, "y1", b)
+        self.assertEqual([x["color"] for x in s["selections"]],
+                         list(range(MAX_SELECTIONS)))
+        self.assertIsNone(next_color_index(s))      # all seven in use
+        with self.assertRaises(ValueError):
+            pick_bin(s, "y1", 99)
+
+    def test_releasing_a_bin_frees_its_color_for_reuse(self):
+        s = initial_store()
+        s = pick_bin(s, "y1", 1)                    # color 0
+        s = pick_bin(s, "y1", 2)                    # color 1
+        s = pick_bin(s, "y1", 1)                    # release the first
+        self.assertEqual([x["color"] for x in s["selections"]], [1])
+        # the cycle continues from where it was, then wraps to the free color
+        nxt = next_color_index(s)
+        self.assertEqual(nxt, 2)
+        # five more picks use 2..6; the freed color 0 is then next in line
+        s2 = s
+        for i in range(5):
+            s2 = pick_bin(s2, "y1", 10 + i)
+        self.assertEqual([x["color"] for x in s2["selections"]],
+                         [1, 2, 3, 4, 5, 6])
+        self.assertEqual(next_color_index(s2), 0)   # wrapped to the freed one
+        s2 = pick_bin(s2, "y1", 99)
+        self.assertEqual(s2["selections"][-1]["color"], 0)
+
+    def test_reclick_releases_and_drops_the_empty_selection(self):
+        s = pick_bin(initial_store(), "y1", 5)
+        s = pick_bin(s, "y1", 5)
+        self.assertEqual(s["selections"], [])       # nothing left to show
+        self.assertIsNone(s["chart"])               # unanchored again
+        self.assertIsNone(s["live"])
 
     def test_unanchored_after_release_accepts_any_chart(self):
-        s = assign_bin(initial_store(), 0, "y1", 5)
-        s = assign_bin(s, 0, "y1", 5)           # release -> unanchored
-        s = assign_bin(s, 0, "y3", 2)           # new anchor allowed
+        s = pick_bin(initial_store(), "y1", 5)
+        s = pick_bin(s, "y1", 5)
+        s = pick_bin(s, "y3", 2)
         self.assertEqual(s["chart"], "y3")
 
-    def test_range_claims_and_steals_but_never_releases(self):
-        s = assign_bin(initial_store(), 0, "y1", 3)
-        s = add_selection(s)
-        s = assign_bin_range(s, 1, "y1", 2, 4)
-        self.assertEqual(s["selections"][0]["bins"], [])
-        self.assertEqual(s["selections"][1]["bins"], [2, 3, 4])
-        s = assign_bin_range(s, 1, "y1", 3, 3)  # re-select own range: no-op
-        self.assertEqual(s["selections"][1]["bins"], [2, 3, 4])
+    def test_a_box_select_is_one_gesture_in_one_color(self):
+        s = pick_bin(initial_store(), "y1", 3)
+        s = pick_range(s, "y1", 2, 4)
+        # the range took bin 3 from the first selection, which then vanished
+        self.assertEqual(len(s["selections"]), 1)
+        self.assertEqual(s["selections"][0]["bins"], [2, 3, 4])
+        self.assertEqual(len({x["color"] for x in s["selections"]}), 1)
 
-    def test_add_selection_arms_it_and_caps(self):
-        s = add_selection(initial_store())
-        self.assertEqual(s["live"], s["selections"][-1]["sid"])
-        while len(s["selections"]) < MAX_SELECTIONS:
-            s = add_selection(s)
-        with self.assertRaises(ValueError):
-            add_selection(s)
+    def test_inverted_range_is_normalized(self):
+        s = pick_range(initial_store(), "y1", 7, 4)
+        self.assertEqual(s["selections"][0]["bins"], [4, 5, 6, 7])
 
-    def test_clear_keeps_section_and_unanchors_when_last(self):
-        s = assign_bin(initial_store(), 0, "y1", 5)
-        s = clear_selection(s, 0)
-        self.assertEqual(len(s["selections"]), 1)   # never disappears
-        self.assertEqual(s["selections"][0]["bins"], [])
+    def test_strip_click_still_transfers_between_selections(self):
+        s = pick_bin(initial_store(), "y1", 5)      # S1 owns 5
+        s = pick_bin(s, "y1", 9)                    # S2 owns 9
+        s = assign_bin(s, s["selections"][1]["sid"], "y1", 5)   # S2 takes 5
+        self.assertEqual([x["bins"] for x in s["selections"]], [[5, 9]])
+
+    def test_clear_drops_the_selection_and_unanchors_when_last(self):
+        s = pick_bin(initial_store(), "y1", 5)
+        sid = s["selections"][0]["sid"]
+        s = clear_selection(s, sid)
+        self.assertEqual(s["selections"], [])
         self.assertIsNone(s["chart"])
-        # anchor survives while ANOTHER selection still holds bins
-        s = assign_bin(s, 0, "y1", 5)
-        s = add_selection(s)
-        s = assign_bin(s, 1, "y1", 7)
-        s = clear_selection(s, 0)
-        self.assertEqual(s["chart"], "y1")
 
-    def test_set_live_arms(self):
-        s = add_selection(initial_store())
-        s = set_live(s, 0)
-        self.assertEqual(s["live"], 0)
-        with self.assertRaises(KeyError):
-            set_live(s, 42)
+    def test_clear_keeps_the_anchor_while_another_selection_holds_bins(self):
+        s = pick_bin(initial_store(), "y1", 5)
+        s = pick_bin(s, "y1", 7)
+        s = clear_selection(s, s["selections"][0]["sid"])
+        self.assertEqual(s["chart"], "y1")
+        self.assertEqual(len(s["selections"]), 1)
 
     def test_mutations_are_copy_on_write(self):
-        before = initial_store()
-        assign_bin(before, 0, "y1", 1)
-        self.assertEqual(before["selections"][0]["bins"], [])
-        self.assertIsNone(before["chart"])
+        before = pick_bin(initial_store(), "y1", 1)
+        pick_bin(before, "y1", 2)
+        self.assertEqual(len(before["selections"]), 1)
+        pick_bin(before, "y1", 1)
+        self.assertEqual(before["selections"][0]["bins"], [1])
 
-    def test_selection_colors_stable_and_distinct(self):
-        self.assertEqual(selection_color(3), selection_color(3))
-        self.assertNotEqual(selection_color(0), selection_color(1))
+    def test_colors_are_the_brand_palette_in_its_order(self):
+        self.assertEqual(len(BRAND_PALETTE), 7)
+        self.assertEqual(BRAND_PALETTE[0], "#0B86D1")   # S2 Blue
+        s = pick_bin(initial_store(), "y1", 1)
+        self.assertEqual(selection_color(s["selections"][0]), "#0B86D1")
 
     def test_chart_slots(self):
         self.assertEqual(CHART_SLOTS, ("y1", "y2", "y3"))
         with self.assertRaises(KeyError):
-            assign_bin(initial_store(), 0, "y9", 1)
+            pick_bin(initial_store(), "y9", 1)
 
 
 class TestMemberMask(unittest.TestCase):

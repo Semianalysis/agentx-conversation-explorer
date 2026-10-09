@@ -6,18 +6,23 @@ the request count in the bin (log or linear y). Measures are getters over the EN
 deepdive_data.aggregate_selection (seq / start_s / busy_s / kv_bytes / flops),
 so KV bytes and FLOPs follow the global serving assumptions.
 
-SELECTIONS: color-coded partitions of ONE shared selection chart. The first
-bin picked anchors store['chart'] to that slot; after that, bins are
-EXCLUSIVE — assigning a bin to the armed inspector steals it from whichever
-inspector held it (click a bin the armed inspector already owns to release
-it). When every inspector is empty the anchor clears and the next click may
-land on any chart. Conditioning always applies: every non-empty selection's
-matching requests stack on the OTHER charts in its color. Inspectors never
-disappear: at least one exists, clearing just empties it.
+SELECTIONS: every CLICK on a bar makes one, in the next of the 7 vivid
+SemiAnalysis brand contrasts (theme.BRAND_PALETTE, cycled the way the
+Simulator cycles them). The clicked bin wears that color on its own chart and
+the other two charts stack the same color where those requests land - that
+stack IS the correlation. Clicking a bin that already belongs to a selection
+releases it, and a selection that runs out of bins is dropped, returning its
+color to the cycle.
+
+The first pick anchors store['chart'] to that slot; bins are EXCLUSIVE across
+selections, and clicks on the other two charts are inert (they are the
+answer, not the question). With nothing selected the anchor clears and the
+next click may land on any chart.
 
 Store shape:
-  {"live": sid, "next_sid": int, "chart": "y1"|"y2"|"y3"|None,
-   "selections": [{"sid": int, "bins": [int, ...]}]}
+  {"live": sid|None, "next_sid": int, "next_color": int,
+   "chart": "y1"|"y2"|"y3"|None,
+   "selections": [{"sid": int, "color": int, "bins": [int, ...]}]}
 
 Every mutation returns a NEW store (copy-on-write). Dash-free module — this
 is the unit-test surface.
@@ -25,9 +30,11 @@ is the unit-test surface.
 from __future__ import annotations
 
 from modules.binning import bin_index
-from modules.theme import PALETTE
+from modules.theme import BRAND_PALETTE
 
-MAX_SELECTIONS = 10
+# One selection per brand color: every live selection is a
+# DIFFERENT color, which is the whole point of the cycle.
+MAX_SELECTIONS = len(BRAND_PALETTE)
 CHART_SLOTS = ("y1", "y2", "y3")
 
 # --- Measure registry (per-chart X measures; y is always request count) ----
@@ -89,26 +96,58 @@ def measure_values(rows: list[dict], key: str) -> list[float]:
 
 # --- Selection store ---------------------------------------------------------
 
-def selection_color(sid: int) -> str:
-    """Stable color for a selection id (survives clearing other selections)."""
-    return PALETTE[sid % len(PALETTE)]
-
-
-def _empty_selection(sid: int) -> dict:
-    return {"sid": sid, "bins": []}
+def selection_color(selection: dict) -> str:
+    """The selection's brand color. The index is carried ON the selection, so
+    it survives other selections coming and going and never drifts."""
+    return BRAND_PALETTE[selection["color"] % len(BRAND_PALETTE)]
 
 
 def initial_store() -> dict:
-    """One empty live selection, no anchored chart."""
-    return {"live": 0, "next_sid": 1, "chart": None,
-            "selections": [_empty_selection(0)]}
+    """Nothing selected: no selections, no anchored chart."""
+    return {"live": None, "next_sid": 0, "next_color": 0, "chart": None,
+            "selections": []}
 
 
 def _copy(store: dict) -> dict:
     return {"live": store["live"], "next_sid": store["next_sid"],
+            "next_color": store.get("next_color", 0),
             "chart": store["chart"],
             "selections": [dict(s, bins=list(s["bins"]))
                            for s in store["selections"]]}
+
+
+def _take_color(store: dict) -> int:
+    """The next free brand color, walking the cycle from where we left off so
+    colors rotate instead of always restarting at blue. Raises when all seven
+    are in use - with one color per selection there is no honest way to add
+    an eighth."""
+    c = next_color_index(store)
+    if c is None:
+        raise ValueError(f"all {len(BRAND_PALETTE)} selection colors are in "
+                         f"use - clear one first")
+    store["next_color"] = (c + 1) % len(BRAND_PALETTE)
+    return c
+
+
+def next_color_index(store: dict) -> int | None:
+    """The brand color the next click would take, without taking it - the
+    cursor wears this. None when all seven are in use."""
+    used = {s["color"] for s in store["selections"]}
+    n = len(BRAND_PALETTE)
+    start = store.get("next_color", 0) % n
+    for step in range(n):
+        c = (start + step) % n
+        if c not in used:
+            return c
+    return None
+
+
+def _drop_empty(store: dict) -> None:
+    """A selection with no bins has nothing to show and no reason to hold a
+    color."""
+    store["selections"] = [s for s in store["selections"] if s["bins"]]
+    if store["live"] not in {s["sid"] for s in store["selections"]}:
+        store["live"] = None
 
 
 def get_selection(store: dict, sid: int) -> dict:
@@ -134,6 +173,51 @@ def _anchor(store: dict, chart: str) -> None:
             f"targeted {chart}")
 
 
+def pick_bin(store: dict, chart: str, bin_idx: int) -> dict:
+    """A click on a bar.
+
+    An unowned bin starts a NEW selection in the next brand color; a bin that
+    already belongs to a selection is released from it, and that selection is
+    dropped if it had nothing else. The first pick anchors the selection
+    chart; a click on another chart raises ValueError (the caller renders
+    those charts inert).
+    """
+    out = _copy(store)
+    _anchor(out, chart)
+    bin_idx = int(bin_idx)
+    for s in out["selections"]:
+        if bin_idx in s["bins"]:
+            s["bins"].remove(bin_idx)
+            _drop_empty(out)
+            _unanchor_if_all_empty(out)
+            return out
+    sel = {"sid": out["next_sid"], "color": _take_color(out),
+           "bins": [bin_idx]}
+    out["next_sid"] += 1
+    out["selections"].append(sel)
+    out["live"] = sel["sid"]
+    return out
+
+
+def pick_range(store: dict, chart: str, lo_bin: int, hi_bin: int) -> dict:
+    """A box-select: ONE gesture, ONE new selection, ONE color, taking the
+    inclusive bin range from whoever held those bins."""
+    if hi_bin < lo_bin:
+        lo_bin, hi_bin = hi_bin, lo_bin
+    out = _copy(store)
+    _anchor(out, chart)
+    claimed = set(range(int(lo_bin), int(hi_bin) + 1))
+    for s in out["selections"]:
+        s["bins"] = [b for b in s["bins"] if b not in claimed]
+    _drop_empty(out)
+    sel = {"sid": out["next_sid"], "color": _take_color(out),
+           "bins": sorted(claimed)}
+    out["next_sid"] += 1
+    out["selections"].append(sel)
+    out["live"] = sel["sid"]
+    return out
+
+
 def assign_bin(store: dict, sid: int, chart: str, bin_idx: int) -> dict:
     """The armed inspector claims a bin: any prior owner loses it (bins are
     exclusive); claiming a bin the inspector already owns releases it. First
@@ -149,53 +233,18 @@ def assign_bin(store: dict, sid: int, chart: str, bin_idx: int) -> dict:
             s["bins"].remove(bin_idx)
     if not already_owned:
         owner["bins"] = sorted(owner["bins"] + [bin_idx])
+    _drop_empty(out)
     _unanchor_if_all_empty(out)
-    return out
-
-
-def assign_bin_range(store: dict, sid: int, chart: str,
-                     lo_bin: int, hi_bin: int) -> dict:
-    """Box-select: the armed inspector claims the inclusive bin range
-    (stealing from other inspectors; no release semantics for ranges)."""
-    if hi_bin < lo_bin:
-        lo_bin, hi_bin = hi_bin, lo_bin
-    out = _copy(store)
-    _anchor(out, chart)
-    claimed = set(range(int(lo_bin), int(hi_bin) + 1))
-    for s in out["selections"]:
-        if s["sid"] != sid:
-            s["bins"] = [b for b in s["bins"] if b not in claimed]
-    owner = get_selection(out, sid)
-    owner["bins"] = sorted(set(owner["bins"]) | claimed)
-    return out
-
-
-def add_selection(store: dict) -> dict:
-    """Append a new empty selection and arm it."""
-    out = _copy(store)
-    if len(out["selections"]) >= MAX_SELECTIONS:
-        raise ValueError(f"at most {MAX_SELECTIONS} selections")
-    sid = out["next_sid"]
-    out["next_sid"] += 1
-    out["selections"].append(_empty_selection(sid))
-    out["live"] = sid
     return out
 
 
 def clear_selection(store: dict, sid: int) -> dict:
-    """Empty a selection. The section stays; the shared chart anchor clears
-    when every selection is empty."""
+    """Drop a selection and return its color to the cycle. The anchor clears
+    when nothing is selected any more."""
     out = _copy(store)
     get_selection(out, sid)["bins"] = []
+    _drop_empty(out)
     _unanchor_if_all_empty(out)
-    return out
-
-
-def set_live(store: dict, sid: int) -> dict:
-    """Arm an inspector: its colored cursor does the next bin picks."""
-    out = _copy(store)
-    get_selection(out, sid)  # KeyError on phantom sid
-    out["live"] = sid
     return out
 
 
