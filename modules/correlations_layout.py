@@ -142,25 +142,22 @@ def layout() -> html.Div:
                  style={"fontSize": "11px", "color": "#666", "marginTop": "14px",
                         "fontStyle": "italic"}),
         controls.label("Selections",
-                       info_text="Inspectors partition the bins of ONE "
-                                 "selection chart (the chart of your first "
-                                 "pick) — a bin belongs to at most one "
-                                 "inspector, and picking it with another "
-                                 "inspector's cursor transfers it. Click an "
-                                 "inspector's colored arrow to ARM it: the "
-                                 "mouse cursor takes its color over the "
-                                 "selection chart (over every chart while "
-                                 "nothing is selected yet — the first pick "
-                                 "may land anywhere; other charts keep the "
-                                 "default cursor and ignore clicks). "
-                                 "Conditioning always applies: each "
-                                 "selection's matching requests stack on the "
-                                 "OTHER charts in its color, section size = "
-                                 "how much of that bar correlates. The "
-                                 "color-coded Clear empties a section (it "
-                                 "stays). Selections reset when the dataset, "
-                                 "filters, measures, x scale, assumptions, "
-                                 "or Explorer selection change."),
+                       info_text="Click a bar and it becomes a selection in "
+                                 "the next of the 7 SemiAnalysis brand "
+                                 "colors - the same seven the Simulator "
+                                 "cycles. The bin you clicked wears that "
+                                 "color on its own chart; the other two "
+                                 "charts stack the same color where those "
+                                 "requests land, so the size of a colored "
+                                 "section is how much of that bar "
+                                 "correlates. Your first click decides which "
+                                 "chart selections live in; clicks on the "
+                                 "other two are inert. Click a selected bin "
+                                 "again to release it - a selection with no "
+                                 "bins left disappears and gives its color "
+                                 "back. Selections reset when the dataset, "
+                                 "filters, measures, x scale or Explorer "
+                                 "selection change."),
         html.Div(id="at-corr-selection-status",
                  style={"fontSize": "11px", "color": "#666",
                         "margin": "0 0 4px"}),
@@ -168,11 +165,6 @@ def layout() -> html.Div:
                  style={"fontSize": "11px", "color": "#a60",
                         "whiteSpace": "pre-wrap"}),
         html.Div(id="at-corr-inspectors"),
-        html.Button("Add selection", id="at-corr-newsel-btn", n_clicks=0,
-                    title="Add another color-coded selection and arm it "
-                          "(its cursor does the next bin picks).",
-                    style={"fontSize": "12px", "padding": "3px 8px",
-                           "marginTop": "8px"}),
         html.Div(id="at-corr-gate-status",
                  style={"fontSize": "12px", "color": "#666", "marginTop": "16px",
                         "fontFamily": "monospace", "whiteSpace": "pre-wrap"}),

@@ -138,6 +138,24 @@ The positional sum mode and bin_weighted are deleted. Internal panel bld 26:
 checkbox selection + one background 'Load selected' (thread + 1 Hz dcc.Interval
 progress bar + Done message; hf_client._BG state).
 
+Correlations colors (bld 42, user request): a CLICK on a bar is the whole
+gesture - it creates a selection in the next of theme.BRAND_PALETTE, the 7
+vivid SemiAnalysis contrasts the Simulator cycles (model_charts op_lookup.js
+DISCOVERY_PALETTE: S2 Blue, S6 Cyan, S3 Teal, S4 Coral, S7 Crimson, S12
+Magenta, SA Metal). The clicked bin wears that color on its own chart and the
+other two stack the SAME color where those requests land. Clicking an owned
+bin releases it; a selection with no bins left is DROPPED and returns its
+color to the cycle. Each selection carries its own `color` index, so
+selection_color(selection) - not (sid) - and colors never drift when
+others come and go. MAX_SELECTIONS == len(BRAND_PALETTE) so every live
+selection is a different color; next_color_index() is the peek the pick
+cursor wears (None = palette exhausted, cursor off). The arming model is
+GONE: no "Add selection" button, no insp-live arrows, no add_selection /
+set_live / assign_bin_range. assign_bin survives for inspector-strip clicks,
+which still transfer a bin between named selections. assets/corr_cursors.css
+is GENERATED from BRAND_PALETTE - regenerate, never hand-edit. theme.PALETTE
+is unchanged and still colors per-conversation/series traces elsewhere.
+
 Pause Analytics tab (bld 39): a PAUSE is dead air on a conversation's
 main-agent lane (frontier of the lane's last activity -> next request start;
 a subagent-only lane uses its own requests). modules/pause_data.py decomposes
